@@ -323,10 +323,10 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 [functions.import-recipe]
 enabled = true
 verify_jwt = true
-import_map = "./functions/import-recipe/deno.json"
+import_map = "./functions/api/import-recipe/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/import-recipe/index.ts"
+entrypoint = "./functions/api/import-recipe/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/import-recipe/*.html" ]
@@ -334,10 +334,10 @@ entrypoint = "./functions/import-recipe/index.ts"
 [functions.health-check]
 enabled = true
 verify_jwt = true
-import_map = "./functions/health-check/deno.json"
+import_map = "./functions/api/health-check/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/health-check/index.ts"
+entrypoint = "./functions/api/health-check/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/health-check/*.html" ]
