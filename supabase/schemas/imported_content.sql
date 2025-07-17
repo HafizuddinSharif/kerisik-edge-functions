@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS public.imported_content (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
     source_url text NOT NULL,
-    content text,
+    content jsonb,
     metadata jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
