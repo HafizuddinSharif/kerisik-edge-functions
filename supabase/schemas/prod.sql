@@ -78,6 +78,31 @@ $$;
 
 ALTER FUNCTION "public"."create_user_on_signup"() OWNER TO "postgres";
 
+CREATE OR REPLACE FUNCTION "public"."increment_ai_imports_used"("user_id" "uuid") RETURNS "integer"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    AS $$
+DECLARE
+    new_count integer;
+BEGIN
+    UPDATE public.user_profile 
+    SET ai_imports_used = ai_imports_used + 1,
+        modified_at = now()
+    WHERE id = user_id;
+    
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'User profile not found for user_id: %', user_id;
+    END IF;
+    
+    SELECT ai_imports_used INTO new_count 
+    FROM public.user_profile 
+    WHERE id = user_id;
+    
+    RETURN new_count;
+END;
+$$;
+
+ALTER FUNCTION "public"."increment_ai_imports_used"("uuid") OWNER TO "postgres";
+
 SET default_tablespace = '';
 
 SET default_table_access_method = "heap";
@@ -305,6 +330,10 @@ GRANT USAGE ON SCHEMA "public" TO "service_role";
 GRANT ALL ON FUNCTION "public"."create_user_on_signup"() TO "anon";
 GRANT ALL ON FUNCTION "public"."create_user_on_signup"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."create_user_on_signup"() TO "service_role";
+
+GRANT ALL ON FUNCTION "public"."increment_ai_imports_used"("uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."increment_ai_imports_used"("uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."increment_ai_imports_used"("uuid") TO "service_role";
 
 
 
