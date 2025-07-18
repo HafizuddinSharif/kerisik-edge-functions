@@ -15,12 +15,12 @@ CREATE TABLE IF NOT EXISTS public.imported_content (
 -- Enable RLS
 ALTER TABLE public.imported_content ENABLE ROW LEVEL SECURITY;
 
--- Create policy for users to view their own imported content
-CREATE POLICY "Users can view their own imported content"
+-- Create policy for users to view all imported content
+CREATE POLICY "Users can view all imported content"
 ON public.imported_content
 FOR SELECT
 TO authenticated
-USING (auth.uid() = user_id);
+USING (true);
 
 -- Create policy for users to insert their own imported content
 CREATE POLICY "Users can insert their own imported content"
