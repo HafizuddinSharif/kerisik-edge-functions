@@ -78,7 +78,7 @@ $$;
 
 ALTER FUNCTION "public"."create_user_on_signup"() OWNER TO "postgres";
 
-CREATE OR REPLACE FUNCTION "public"."increment_ai_imports_used"("user_id" "uuid") RETURNS "integer"
+CREATE OR REPLACE FUNCTION "public"."increment_ai_imports_used"("user_id" "uuid") RETURNS integer
     LANGUAGE "plpgsql" SECURITY DEFINER
     AS $$
 DECLARE
