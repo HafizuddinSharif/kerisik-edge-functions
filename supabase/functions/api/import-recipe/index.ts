@@ -220,8 +220,9 @@ const sanitizeUrl = async (url: string): Promise<string> => {
     }
   }
 
+  // if it's not tiktok or instagram, return the final URL
   if (!minimalUrl) {
-    throw new Error("Unsupported URL or ID not found");
+    return finalUrl;
   }
 
   return minimalUrl;
