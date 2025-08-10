@@ -206,13 +206,30 @@ const sanitizeUrl = async (url: string): Promise<string> => {
 
   let minimalUrl = null;
 
-  // TikTok → keep only https://www.tiktok.com/video/<video_id>
+  // TikTok → prefer https://www.tiktok.com/@<username>/video/<video_id>
   if (finalUrl.includes("tiktok.com")) {
-    const match = finalUrl.match(/\/video\/(\d+)/);
-    if (match) {
-      minimalUrl = `https://www.tiktok.com/video/${match[1]}`;
+    // If username is present, preserve it
+    const withUser = finalUrl.match(/\/@([^/]+)\/video\/(\d+)/);
+    if (withUser) {
+      minimalUrl = `https://www.tiktok.com/@${withUser[1]}/video/${
+        withUser[2]
+      }`;
+    } else {
+      // Try canonical tag to resolve username form
+      const canonical = await getCanonicalFromHtml(finalUrl, "tiktok");
+      if (canonical) {
+        minimalUrl = canonical;
+      } else {
+        // Fallback: keep the original URL (without query) if username is missing
+        const idOnly = finalUrl.match(/\/video\/(\d+)/);
+        if (idOnly) {
+          const u = new URL(finalUrl);
+          u.search = "";
+          minimalUrl = u.toString();
+        }
+      }
     }
-  } // Instagram → keep only https://www.instagram.com/reel/<shortcode>/
+  } // Instagram → keep only https://www.instagram.com/reel/<shortcode>/ (no username requirement)
   else if (finalUrl.includes("instagram.com")) {
     const match = finalUrl.match(/\/reel\/([A-Za-z0-9_-]+)/);
     if (match) {
@@ -222,8 +239,43 @@ const sanitizeUrl = async (url: string): Promise<string> => {
 
   // if it's not tiktok or instagram, return the final URL
   if (!minimalUrl) {
-    return finalUrl;
+    // Remove the query params from the final URL
+    const urlObj = new URL(finalUrl);
+    urlObj.search = "";
+    minimalUrl = urlObj.toString();
+    return minimalUrl;
   }
 
   return minimalUrl;
 };
+
+async function getCanonicalFromHtml(
+  pageUrl: string,
+  platform: "tiktok",
+): Promise<string | null> {
+  try {
+    const resp = await fetch(pageUrl, {
+      redirect: "follow",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+    });
+    const html = await resp.text();
+    if (platform === "tiktok") {
+      const m = html.match(
+        /<link[^>]+rel=["']canonical["'][^>]+href=["'](https?:\/\/www\.tiktok\.com\/@[^"']+?\/video\/\d+)["']/i,
+      );
+      if (m) {
+        const u = new URL(m[1]);
+        u.search = "";
+        return u.toString();
+      }
+    }
+  } catch (_err) {
+    // ignore parsing/network errors; caller will fallback
+  }
+  return null;
+}
