@@ -17,9 +17,13 @@ interface MealContent {
 }
 
 export interface ImportFromUrlResponse {
-    success: boolean;
-    url: string;
     content: MealContent;
     metadata: Record<string, string>;
+}
+
+export interface RestResponse<T> {
+    success: boolean;
     error: string | null;
+    error_code: string | null;
+    data: T | null;
 }

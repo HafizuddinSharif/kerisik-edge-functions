@@ -1,5 +1,10 @@
 // Utility function for calling the MS LLM API at http://127.0.0.1:8000
 
+import {
+    ImportFromUrlResponse,
+    RestResponse,
+} from "../dto/controller-response.ts";
+
 // Types for the API request and response
 export interface MSLLMRequest {
     prompt?: string;
@@ -12,6 +17,17 @@ export interface MSLLMRequest {
     top_p?: number;
     [key: string]: any; // Allow additional properties
 }
+
+// export interface MSLLMExtractRecipeResponse {
+//     success: boolean;
+//     url: string;
+//     content: ImportFromUrlResponse;
+//     metadata: {
+//         title: string;
+//         description: string;
+//     };
+//     error: string | null;
+// }
 
 export interface MSLLMResponse {
     id?: string;
@@ -73,7 +89,7 @@ export class MSLLMClient {
         endpoint: string = "/",
         requestData: MSLLMRequest = {},
         method: "GET" | "POST" | "PUT" | "DELETE" = "POST",
-    ): Promise<MSLLMResponse> {
+    ): Promise<RestResponse<ImportFromUrlResponse>> {
         const url = `${this.options.baseUrl}${endpoint}`;
 
         try {
@@ -95,13 +111,21 @@ export class MSLLMClient {
             clearTimeout(timeoutId);
 
             if (!response.ok) {
-                throw new Error(
-                    `HTTP error! status: ${response.status} - ${response.statusText}`,
-                );
+                const error = await response.json();
+                const errorObj = {
+                    success: false,
+                    error: error.detail.message,
+                    error_code: error.detail.code,
+                } as RestResponse<ImportFromUrlResponse>;
+
+                return errorObj;
+                // throw new Error(
+                //     `HTTP error! status: ${response.status} - ${response.statusText} - ${error.detail.message}`,
+                // );
             }
 
             const data = await response.json();
-            return data as MSLLMResponse;
+            return data as RestResponse<ImportFromUrlResponse>;
         } catch (error) {
             if (error instanceof Error) {
                 if (error.name === "AbortError") {
@@ -113,38 +137,6 @@ export class MSLLMClient {
             }
             throw new Error(`Unknown error occurred: ${error}`);
         }
-    }
-
-    /**
-     * Send a simple prompt to the LLM
-     */
-    async sendPrompt(
-        prompt: string,
-        options: Partial<MSLLMRequest> = {},
-    ): Promise<MSLLMResponse> {
-        const requestData: MSLLMRequest = {
-            prompt,
-            ...options,
-        };
-
-        return this.callAPI("/", requestData);
-    }
-
-    /**
-     * Send a conversation-style message to the LLM
-     */
-    async sendMessage(
-        messages: Array<
-            { role: "user" | "assistant" | "system"; content: string }
-        >,
-        options: Partial<MSLLMRequest> = {},
-    ): Promise<MSLLMResponse> {
-        const requestData: MSLLMRequest = {
-            messages,
-            ...options,
-        };
-
-        return this.callAPI("/", requestData);
     }
 
     /**
@@ -161,31 +153,6 @@ export class MSLLMClient {
 
         return null;
     }
-}
-
-/**
- * Convenience function for quick API calls
- */
-export async function callMSLLM(
-    requestData: MSLLMRequest,
-    options: MSLLMOptions = {},
-): Promise<MSLLMResponse> {
-    const client = new MSLLMClient(options);
-    return client.callAPI("/", requestData);
-}
-
-/**
- * Convenience function for simple prompt requests
- */
-export async function sendPrompt(
-    prompt: string,
-    options: MSLLMOptions & Partial<MSLLMRequest> = {},
-): Promise<string | null> {
-    const { baseUrl, timeout, headers, ...requestOptions } = options;
-    const client = new MSLLMClient({ baseUrl, timeout, headers });
-
-    const response = await client.sendPrompt(prompt, requestOptions);
-    return MSLLMClient.getResponseContent(response);
 }
 
 /**
