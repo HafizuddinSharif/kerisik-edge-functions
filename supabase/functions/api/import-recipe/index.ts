@@ -15,9 +15,11 @@ import { getAuthenticatedUserOrThrow } from "../../utils/auth.ts";
 Deno.serve(async (req) => {
   try {
     const { url } = await req.json();
+    // Sanitize the URL to remove unecessary parameters
     const sanitizedUrl = await sanitizeUrl(url);
     const supabase = createSupabaseAdminClient();
 
+    // If we are not in DEV mode, we need to authenticate the user
     let userId: string | null = null;
     if (!shouldBypassAuth()) {
       try {
@@ -30,6 +32,8 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Check if the content already exists in the database
+    // To avoid duplicates, we should only import the content once.
     const existingContent = await findExistingContent(supabase, sanitizedUrl);
     if (existingContent) {
       console.log("✅ Existing content found:", existingContent);
@@ -46,11 +50,13 @@ Deno.serve(async (req) => {
       return jsonOk(restResponse);
     }
 
+    // If the content does not exist in the DB, we need to extract the content from the URL
     const extractionResponse = await extractContent(sanitizedUrl);
     if (!extractionResponse.success) {
       return jsonOk(extractionResponse);
     }
 
+    // Insert the content into the DB
     const { importedContent, error: insertError } = await insertImportedContent(
       supabase,
       userId,
@@ -62,8 +68,10 @@ Deno.serve(async (req) => {
       return jsonError("Failed to store content", 500);
     }
 
+    // Increment the user's AI imports used counter
     await incrementAiImportsUsedIfNeeded(supabase, userId);
 
+    // Return the content
     const responseContent: ImportFromUrlResponse = {
       content: importedContent.content,
       metadata: importedContent.metadata,
@@ -82,7 +90,10 @@ Deno.serve(async (req) => {
   }
 });
 
-// --------------- Helpers ---------------
+// ------------------------------------------------------------------------------
+// HELPER FUNCTIONS
+// ------------------------------------------------------------------------------
+
 function getBooleanEnv(name: string, defaultValue = false): boolean {
   const raw = (Deno.env.get(name) || "").toLowerCase();
   if (!raw) return defaultValue;
