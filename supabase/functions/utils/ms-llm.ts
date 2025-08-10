@@ -64,8 +64,8 @@ export interface MSLLMOptions {
  * Default configuration for the MS LLM API
  */
 const DEFAULT_OPTIONS: MSLLMOptions = {
-    // baseUrl: "https://kerisik-fastapi-production.up.railway.app",
-    baseUrl: "http://host.docker.internal:8000",
+    baseUrl: Deno.env.get("MS_LLM_BASE_URL") ||
+        "http://host.docker.internal:8000",
     timeout: 30000, // 30 seconds
     headers: {
         "Content-Type": "application/json",
