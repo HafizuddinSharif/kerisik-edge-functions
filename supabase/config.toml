@@ -322,6 +322,7 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 
 [functions.import-recipe]
 enabled = true
+# In development you can disable JWT verification when using IMPORT_RECIPE_NO_AUTH=true
 verify_jwt = true
 import_map = "./functions/api/import-recipe/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.

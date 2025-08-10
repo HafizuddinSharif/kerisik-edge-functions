@@ -1,7 +1,9 @@
+import type { SupabaseClient, User } from "jsr:@supabase/supabase-js@2";
+
 export const authenticateUser = async (
-    supabase: any,
+    supabase: SupabaseClient,
     req: Request,
-) => {
+): Promise<User | Response> => {
     // Get the authorization header
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
@@ -18,14 +20,6 @@ export const authenticateUser = async (
     // // Extract the JWT token
     const token = authHeader.replace("Bearer ", "");
 
-    // const { data: { session } } = await supabase.auth.signInWithPassword({
-    //   email: "user1@test.com",
-    //   password: "323211",
-    // });
-
-    // const accessToken = session?.access_token;
-    // console.log("accessToken", accessToken);
-
     // Verify the JWT token and get user info
     const { data: { user }, error: userError } = await supabase.auth.getUser(
         token,
@@ -40,5 +34,26 @@ export const authenticateUser = async (
         );
     }
 
-    return user;
+    return user as unknown as User;
+};
+
+export const getAuthenticatedUserOrThrow = async (
+    supabase: SupabaseClient,
+    req: Request,
+): Promise<User> => {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+        throw new Error("Authorization header required");
+    }
+
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: userError } = await supabase.auth.getUser(
+        token,
+    );
+
+    if (userError || !user) {
+        throw new Error("Invalid token");
+    }
+
+    return user as unknown as User;
 };
