@@ -298,8 +298,10 @@ inspector_port = 8083
 # The Deno major version to use.
 deno_version = 1
 
-# [edge_runtime.secrets]
-# secret_key = "env(SECRET_VALUE)"
+[edge_runtime.secrets]
+NODE_ENV = "development"
+IMPORT_RECIPE_NO_AUTH = "true"
+MS_LLM_API_KEY = "ParrWt3BWd5sW07CIxasRqv37XUWDZQOYfSduLPP3BRqC9G16OWKhgzc2s5WCuw3"
 
 [analytics]
 enabled = true
@@ -323,7 +325,7 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 [functions.import-recipe]
 enabled = true
 # In development you can disable JWT verification when using IMPORT_RECIPE_NO_AUTH=true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/api/import-recipe/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx

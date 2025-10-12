@@ -14,6 +14,7 @@ import { getAuthenticatedUserOrThrow } from "../../utils/auth.ts";
 
 Deno.serve(async (req) => {
   try {
+    console.log("🔍 Importing recipe from URL");
     const { url } = await req.json();
     // Sanitize the URL to remove unecessary parameters
     const sanitizedUrl = await sanitizeUrl(url);
@@ -141,7 +142,11 @@ async function findExistingContent(
 
 async function extractContent(sanitizedUrl: string) {
   const msLLM = new MSLLMClient();
-  return await msLLM.callAPI("/extract-content", { url: sanitizedUrl }, "POST");
+  return await msLLM.callAPI(
+    "/api/v2/extract-content",
+    { url: sanitizedUrl },
+    "POST",
+  );
 }
 
 async function insertImportedContent(

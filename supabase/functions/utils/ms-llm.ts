@@ -91,6 +91,9 @@ export class MSLLMClient {
         method: "GET" | "POST" | "PUT" | "DELETE" = "POST",
     ): Promise<RestResponse<ImportFromUrlResponse>> {
         const url = `${this.options.baseUrl}${endpoint}`;
+        console.log("🔍 Calling API:", url);
+        console.log("🔍 Request data:", requestData);
+        console.log("🔍 Method:", method);
 
         try {
             const controller = new AbortController();
@@ -99,9 +102,15 @@ export class MSLLMClient {
                 this.options.timeout,
             );
 
+            const headers: Record<string, string> = { ...this.options.headers };
+            const apiKey = Deno.env.get("MS_LLM_API_KEY");
+            if (apiKey) {
+                headers["x-api-key"] = apiKey;
+            }
+
             const response = await fetch(url, {
                 method,
-                headers: this.options.headers,
+                headers,
                 body: method !== "GET"
                     ? JSON.stringify(requestData)
                     : undefined,
@@ -118,15 +127,15 @@ export class MSLLMClient {
                     error_code: error.detail.code,
                 } as RestResponse<ImportFromUrlResponse>;
 
+                console.log("🔍 Error object:", error);
+
                 return errorObj;
-                // throw new Error(
-                //     `HTTP error! status: ${response.status} - ${response.statusText} - ${error.detail.message}`,
-                // );
             }
 
             const data = await response.json();
             return data as RestResponse<ImportFromUrlResponse>;
         } catch (error) {
+            console.log("🔍 Error:", error);
             if (error instanceof Error) {
                 if (error.name === "AbortError") {
                     throw new Error(
