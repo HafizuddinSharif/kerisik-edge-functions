@@ -117,6 +117,8 @@ export class MSLLMClient {
                 signal: controller.signal,
             });
 
+            console.log("🔍 Response:", response);
+
             clearTimeout(timeoutId);
 
             if (!response.ok) {
@@ -135,7 +137,7 @@ export class MSLLMClient {
             const data = await response.json();
             return data as RestResponse<ImportFromUrlResponse>;
         } catch (error) {
-            console.log("🔍 Error:", error);
+            console.error("🔍 Error:", error);
             if (error instanceof Error) {
                 if (error.name === "AbortError") {
                     throw new Error(

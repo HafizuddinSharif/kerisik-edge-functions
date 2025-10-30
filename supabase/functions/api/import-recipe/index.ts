@@ -141,7 +141,7 @@ async function findExistingContent(
 }
 
 async function extractContent(sanitizedUrl: string) {
-  const msLLM = new MSLLMClient();
+  const msLLM = new MSLLMClient({ timeout: 60000 });
   return await msLLM.callAPI(
     "/api/v2/extract-content",
     { url: sanitizedUrl },
@@ -239,6 +239,12 @@ const sanitizeUrl = async (url: string): Promise<string> => {
     const match = finalUrl.match(/\/reel\/([A-Za-z0-9_-]+)/);
     if (match) {
       minimalUrl = `https://www.instagram.com/reel/${match[1]}/`;
+    }
+  }
+  else if (finalUrl.includes("youtube.com")) {
+    const match = finalUrl.match(/\/watch\?v=([A-Za-z0-9_-]+)/);
+    if (match) {
+      minimalUrl = `https://www.youtube.com/watch?v=${match[1]}`;
     }
   }
 
