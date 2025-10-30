@@ -1,6 +1,8 @@
 -- Imported Content Table Schema
 -- This file defines the imported_content table structure declaratively
 
+CREATE TYPE public.imported_content_status AS ENUM ('PROCESSING', 'COMPLETED', 'FAILED');
+
 -- Create table for storing imported content from URLs
 CREATE TABLE IF NOT EXISTS public.imported_content (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -10,7 +12,7 @@ CREATE TABLE IF NOT EXISTS public.imported_content (
     metadata jsonb,
     video_duration integer,
     is_recipe_content boolean,
-    status enum('PROCESSING', 'COMPLETED', 'FAILED'),
+    status imported_content_status NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
