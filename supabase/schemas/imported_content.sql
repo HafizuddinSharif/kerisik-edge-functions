@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS public.imported_content (
     source_url text NOT NULL,
     content jsonb,
     metadata jsonb,
+    video_duration integer,
+    is_recipe_content boolean,
+    status enum('PROCESSING', 'COMPLETED', 'FAILED'),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
