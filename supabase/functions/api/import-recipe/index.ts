@@ -257,6 +257,8 @@ const sanitizeUrl = async (url: string): Promise<string> => {
     return minimalUrl;
   }
 
+  console.log("🔍 Final URL:", minimalUrl);
+
   return minimalUrl;
 };
 
