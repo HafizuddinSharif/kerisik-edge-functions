@@ -28,9 +28,7 @@ Deno.serve(async (req) => {
       try {
         await getAuthenticatedUserIdOrThrow(supabase, req);
       } catch (authErr) {
-        const message = authErr instanceof Error
-          ? authErr.message
-          : "Unauthorized";
+        const message = authErr instanceof Error ? authErr.message : "Unauthorized";
         return jsonError(message, 401);
       }
     }
@@ -46,8 +44,7 @@ Deno.serve(async (req) => {
     console.log("[IMPORT URL] Sanitized URL:", sanitizedUrl);
 
     // Proxy call to FastAPI backend which owns imported_content writes
-    const backendBaseUrl = Deno.env.get("MS_LLM_BASE_URL") ??
-      "http://host.docker.internal:8000";
+    const backendBaseUrl = Deno.env.get("MS_LLM_BASE_URL") ?? "http://host.docker.internal:8000";
     const backendUrl = `${backendBaseUrl}/api/v2/import-from-url`;
 
     const headers: Record<string, string> = {
@@ -58,7 +55,7 @@ Deno.serve(async (req) => {
       headers["x-api-key"] = apiKey;
     }
 
-    const backendResponse = await fetch(backendUrl, {
+    const backendResponse = await fetchWithRetry(backendUrl, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -73,9 +70,7 @@ Deno.serve(async (req) => {
     return new Response(body, {
       status: backendResponse.status,
       headers: {
-        "Content-Type":
-          backendResponse.headers.get("Content-Type") ??
-          "application/json",
+        "Content-Type": backendResponse.headers.get("Content-Type") ?? "application/json",
       },
     });
   } catch (error) {
@@ -96,9 +91,7 @@ function getBooleanEnv(name: string, defaultValue = false): boolean {
 }
 
 function isDevelopment(): boolean {
-  const envValue =
-    (Deno.env.get("NODE_ENV") || Deno.env.get("ENVIRONMENT") || "")
-      .toLowerCase();
+  const envValue = (Deno.env.get("NODE_ENV") || Deno.env.get("ENVIRONMENT") || "").toLowerCase();
   return envValue === "development";
 }
 
@@ -112,16 +105,9 @@ function createSupabaseAdminClient(): SupabaseClient {
   return createClient(supabaseUrl, supabaseServiceKey);
 }
 
-async function getAuthenticatedUserIdOrThrow(
-  supabase: SupabaseClient,
-  req: Request,
-): Promise<string> {
+async function getAuthenticatedUserIdOrThrow(supabase: SupabaseClient, req: Request): Promise<string> {
   const user = await getAuthenticatedUserOrThrow(supabase, req);
-  const { data: profile, error } = await supabase
-    .from("user_profile")
-    .select("id")
-    .eq("auth_id", user.id)
-    .single();
+  const { data: profile, error } = await supabase.from("user_profile").select("id").eq("auth_id", user.id).single();
 
   if (error || !profile) {
     console.error("User profile not found for auth user", {
@@ -132,6 +118,42 @@ async function getAuthenticatedUserIdOrThrow(
   }
 
   return profile.id as string;
+}
+
+async function fetchWithRetry(url: string, init: RequestInit, maxAttempts = 3, baseDelayMs = 200): Promise<Response> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(url, init);
+
+      // If it's a success or a non-retryable error, return immediately
+      if (!shouldRetryResponse(res) || attempt === maxAttempts) {
+        return res;
+      }
+
+      console.warn(`[IMPORT URL] Backend responded with ${res.status}, retrying (${attempt}/${maxAttempts})`);
+    } catch (err) {
+      lastError = err;
+
+      if (attempt === maxAttempts) {
+        console.error("[IMPORT URL] Failed to reach backend after retries:", err);
+        throw err;
+      }
+
+      console.warn(`[IMPORT URL] Network error calling backend, retrying (${attempt}/${maxAttempts})`, err);
+    }
+
+    const delay = baseDelayMs * attempt;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Unknown fetch error after retries");
+}
+
+function shouldRetryResponse(res: Response): boolean {
+  // Retry on common transient upstream errors
+  return res.status === 502 || res.status === 503 || res.status === 504;
 }
 
 function jsonOk<T>(data: T): Response {
@@ -147,11 +169,7 @@ function jsonAccepted<T>(data: T): Response {
   });
 }
 
-function jsonError(
-  message: string,
-  status = 500,
-  error_code: string | null = null,
-): Response {
+function jsonError(message: string, status = 500, error_code: string | null = null): Response {
   const body = {
     success: false,
     error: message,
@@ -165,8 +183,7 @@ function jsonError(
 }
 
 const checkIfUrlIsAllowed = (url: string): boolean => {
-  return url.includes("tiktok.com") || url.includes("instagram.com") ||
-    url.includes("youtube.com") || url.includes("youtu.be");
+  return url.includes("tiktok.com") || url.includes("instagram.com") || url.includes("youtube.com") || url.includes("youtu.be");
 };
 
 const resolveToFinalUrl = async (url: string): Promise<string> => {
@@ -185,9 +202,7 @@ const sanitizeUrl = async (url: string): Promise<string> => {
     // If username is present, preserve it
     const withUser = url.match(/\/@([^/]+)\/video\/(\d+)/);
     if (withUser) {
-      minimalUrl = `https://www.tiktok.com/@${withUser[1]}/video/${
-        withUser[2]
-      }`;
+      minimalUrl = `https://www.tiktok.com/@${withUser[1]}/video/${withUser[2]}`;
     } else {
       // Try canonical tag to resolve username form
       const canonical = await getCanonicalFromHtml(url, "tiktok");
@@ -236,33 +251,22 @@ const sanitizeUrl = async (url: string): Promise<string> => {
 };
 
 async function findUserProfileByEmail(supabase: SupabaseClient, email: string) {
-  const { data, error } = await supabase
-    .from("user_profile")
-    .select("*")
-    .eq("email", email)
-    .single();
+  const { data, error } = await supabase.from("user_profile").select("*").eq("email", email).single();
   return data;
 }
 
-async function getCanonicalFromHtml(
-  pageUrl: string,
-  platform: "tiktok",
-): Promise<string | null> {
+async function getCanonicalFromHtml(pageUrl: string, platform: "tiktok"): Promise<string | null> {
   try {
     const resp = await fetch(pageUrl, {
       redirect: "follow",
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-        "Accept":
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
     });
     const html = await resp.text();
     if (platform === "tiktok") {
-      const m = html.match(
-        /<link[^>]+rel=["']canonical["'][^>]+href=["'](https?:\/\/www\.tiktok\.com\/@[^"']+?\/video\/\d+)["']/i,
-      );
+      const m = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["'](https?:\/\/www\.tiktok\.com\/@[^"']+?\/video\/\d+)["']/i);
       if (m) {
         const u = new URL(m[1]);
         u.search = "";
