@@ -21,6 +21,14 @@ export interface ImportFromUrlResponse {
     metadata: Record<string, string>;
 }
 
+export interface ImportFromUrlProcessingResponse {
+    extract_id: string;
+    status: "PROCESSING" | "COMPLETED" | "FAILED";
+    content: MealContent | null;
+    video_duration: number | null;
+    is_recipe_content: boolean;
+}
+
 export interface RestResponse<T> {
     success: boolean;
     error: string | null;

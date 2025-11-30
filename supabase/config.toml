@@ -301,7 +301,7 @@ deno_version = 1
 [edge_runtime.secrets]
 NODE_ENV = "development"
 IMPORT_RECIPE_NO_AUTH = "true"
-MS_LLM_API_KEY = "ParrWt3BWd5sW07CIxasRqv37XUWDZQOYfSduLPP3BRqC9G16OWKhgzc2s5WCuw3"
+MS_LLM_API_KEY = "localkey"
 
 [analytics]
 enabled = true

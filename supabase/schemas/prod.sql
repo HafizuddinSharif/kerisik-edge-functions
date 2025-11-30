@@ -69,8 +69,8 @@ CREATE OR REPLACE FUNCTION "public"."create_user_on_signup"() RETURNS "trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
     AS $$
 BEGIN
-  INSERT INTO public.user_profile (id, email, is_pro, ai_imports_used)
-  VALUES (new.id, new.email, FALSE, 0);
+  INSERT INTO public.user_profile (id, auth_id, email, is_pro, ai_imports_used)
+  VALUES (gen_random_uuid(), new.id, new.email, FALSE, 0);
   RETURN new;
 END;
 $$;
@@ -110,6 +110,7 @@ SET default_table_access_method = "heap";
 
 CREATE TABLE IF NOT EXISTS "public"."user_profile" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "auth_id" "uuid",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "modified_at" timestamp without time zone DEFAULT "now"() NOT NULL,
     "is_pro" boolean DEFAULT false NOT NULL,
@@ -124,14 +125,16 @@ ALTER TABLE "public"."user_profile" OWNER TO "postgres";
 ALTER TABLE ONLY "public"."user_profile"
     ADD CONSTRAINT "user_profile_pkey" PRIMARY KEY ("id");
 
+ALTER TABLE ONLY "public"."user_profile"
+    ADD CONSTRAINT "user_profile_auth_id_key" UNIQUE ("auth_id");
 
 
 ALTER TABLE ONLY "public"."user_profile"
-    ADD CONSTRAINT "user_profile_id_fkey" FOREIGN KEY ("id") REFERENCES "auth"."users"("id") ON UPDATE CASCADE ON DELETE CASCADE;
+    ADD CONSTRAINT "user_profile_auth_id_fkey" FOREIGN KEY ("auth_id") REFERENCES "auth"."users"("id") ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 
-CREATE POLICY "Enable users to view their own data only" ON "public"."user_profile" FOR SELECT TO "authenticated" USING ((( SELECT "auth"."uid"() AS "uid") = "id"));
+CREATE POLICY "Enable users to view their own data only" ON "public"."user_profile" FOR SELECT TO "authenticated" USING ((( SELECT "auth"."uid"() AS "uid") = "auth_id"));
 
 
 

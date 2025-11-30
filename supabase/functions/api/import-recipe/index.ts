@@ -4,27 +4,29 @@
 
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { MSLLMClient } from "../../utils/ms-llm.ts";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import {
-  ImportFromUrlResponse,
-  RestResponse,
-} from "../../dto/controller-response.ts";
 import { getAuthenticatedUserOrThrow } from "../../utils/auth.ts";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+/**
+ * Thin proxy edge function:
+ *  - Validates the Supabase auth token (unless in DEV bypass mode)
+ *  - Normalises/sanitises the incoming URL
+ *  - Forwards the request to the FastAPI backend `/api/v2/import-from-url`
+ *    which owns ALL Supabase writes for imported_content.
+ *
+ * This function MUST NOT perform any inserts/updates/RPC calls to Supabase.
+ */
 Deno.serve(async (req) => {
   try {
-    console.log("🔍 Importing recipe from URL");
-    const { url } = await req.json();
-    // Sanitize the URL to remove unecessary parameters
-    const sanitizedUrl = await sanitizeUrl(url);
-    const supabase = createSupabaseAdminClient();
+    console.log("[IMPORT URL] Importing recipe from URL (edge proxy)");
+    const { url, email } = await req.json();
+    console.log("[IMPORT URL] Email:", email);
 
-    // If we are not in DEV mode, we need to authenticate the user
-    let userId: string | null = null;
+    // Authenticate user via Supabase (read-only, no DB writes)
+    const supabase = createSupabaseAdminClient();
     if (!shouldBypassAuth()) {
       try {
-        userId = await getAuthenticatedUserIdOrThrow(supabase, req);
+        await getAuthenticatedUserIdOrThrow(supabase, req);
       } catch (authErr) {
         const message = authErr instanceof Error
           ? authErr.message
@@ -33,59 +35,51 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Check if the content already exists in the database
-    // To avoid duplicates, we should only import the content once.
-    const existingContent = await findExistingContent(supabase, sanitizedUrl);
-    if (existingContent) {
-      console.log("✅ Existing content found:", existingContent);
-      const mealContent: ImportFromUrlResponse = {
-        content: existingContent.content,
-        metadata: existingContent.metadata,
-      };
-      const restResponse: RestResponse<ImportFromUrlResponse> = {
-        success: true,
-        error: null,
-        error_code: null,
-        data: mealContent,
-      };
-      return jsonOk(restResponse);
+    // Sanitize the URL to remove unnecessary parameters / resolve redirects
+    let resolved = url;
+    if (!checkIfUrlIsAllowed(url)) {
+      console.log("[IMPORT URL] URL is not youtube or tiktok:", url);
+      resolved = await resolveToFinalUrl(url);
     }
+    const sanitizedUrl = await sanitizeUrl(resolved);
+    console.log("[IMPORT URL] URL:", url);
+    console.log("[IMPORT URL] Sanitized URL:", sanitizedUrl);
 
-    // If the content does not exist in the DB, we need to extract the content from the URL
-    const extractionResponse = await extractContent(sanitizedUrl);
-    if (!extractionResponse.success) {
-      return jsonOk(extractionResponse);
-    }
+    // Proxy call to FastAPI backend which owns imported_content writes
+    const backendBaseUrl = Deno.env.get("MS_LLM_BASE_URL") ??
+      "http://host.docker.internal:8000";
+    const backendUrl = `${backendBaseUrl}/api/v2/import-from-url`;
 
-    // Insert the content into the DB
-    const { importedContent, error: insertError } = await insertImportedContent(
-      supabase,
-      userId,
-      sanitizedUrl,
-      extractionResponse,
-    );
-    if (insertError) {
-      console.error("Error inserting content:", insertError);
-      return jsonError("Failed to store content", 500);
-    }
-
-    // Increment the user's AI imports used counter
-    await incrementAiImportsUsedIfNeeded(supabase, userId);
-
-    // Return the content
-    const responseContent: ImportFromUrlResponse = {
-      content: importedContent.content,
-      metadata: importedContent.metadata,
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
     };
-    const restResponse: RestResponse<ImportFromUrlResponse> = {
-      success: true,
-      error: null,
-      error_code: null,
-      data: responseContent,
-    };
-    return jsonOk(restResponse);
+    const apiKey = Deno.env.get("MS_LLM_API_KEY");
+    if (apiKey) {
+      headers["x-api-key"] = apiKey;
+    }
+
+    const backendResponse = await fetch(backendUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        url: sanitizedUrl,
+        email,
+        mode: "async",
+      }),
+    });
+
+    const body = await backendResponse.text();
+
+    return new Response(body, {
+      status: backendResponse.status,
+      headers: {
+        "Content-Type":
+          backendResponse.headers.get("Content-Type") ??
+          "application/json",
+      },
+    });
   } catch (error) {
-    console.error("Error in import-from-url function:", error);
+    console.error("[IMPORT URL] Error in import-from-url edge proxy:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
     return jsonError(message, 500);
   }
@@ -123,66 +117,32 @@ async function getAuthenticatedUserIdOrThrow(
   req: Request,
 ): Promise<string> {
   const user = await getAuthenticatedUserOrThrow(supabase, req);
-  return user.id;
-}
-
-async function findExistingContent(
-  supabase: SupabaseClient,
-  sourceUrl: string,
-) {
-  const { data } = await supabase
-    .from("imported_content")
-    .select("*")
-    .eq("source_url", sourceUrl)
-    .order("created_at", { ascending: false })
-    .limit(1)
+  const { data: profile, error } = await supabase
+    .from("user_profile")
+    .select("id")
+    .eq("auth_id", user.id)
     .single();
-  return data;
-}
 
-async function extractContent(sanitizedUrl: string) {
-  const msLLM = new MSLLMClient({ timeout: 60000 });
-  return await msLLM.callAPI(
-    "/api/v2/extract-content",
-    { url: sanitizedUrl },
-    "POST",
-  );
-}
-
-async function insertImportedContent(
-  supabase: SupabaseClient,
-  userId: string | null,
-  sourceUrl: string,
-  response: RestResponse<ImportFromUrlResponse>,
-) {
-  const { data, error } = await supabase
-    .from("imported_content")
-    .insert({
-      user_id: userId,
-      source_url: sourceUrl,
-      content: response.data?.content || null,
-      metadata: response.data?.metadata || null,
-    })
-    .select()
-    .single();
-  return { importedContent: data, error };
-}
-
-async function incrementAiImportsUsedIfNeeded(
-  supabase: SupabaseClient,
-  userId: string | null,
-) {
-  if (!userId) return;
-  const { error } = await supabase.rpc("increment_ai_imports_used", {
-    user_id: userId,
-  });
-  if (error) {
-    console.error("Error updating user profile:", error);
+  if (error || !profile) {
+    console.error("User profile not found for auth user", {
+      authUserId: user.id,
+      error,
+    });
+    throw new Error("User profile not found");
   }
+
+  return profile.id as string;
 }
 
 function jsonOk<T>(data: T): Response {
   return new Response(JSON.stringify(data), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function jsonAccepted<T>(data: T): Response {
+  return new Response(JSON.stringify(data), {
+    status: 202,
     headers: { "Content-Type": "application/json" },
   });
 }
@@ -192,7 +152,7 @@ function jsonError(
   status = 500,
   error_code: string | null = null,
 ): Response {
-  const body: RestResponse<ImportFromUrlResponse> = {
+  const body = {
     success: false,
     error: message,
     error_code,
@@ -204,45 +164,58 @@ function jsonError(
   });
 }
 
+const checkIfUrlIsAllowed = (url: string): boolean => {
+  return url.includes("tiktok.com") || url.includes("instagram.com") ||
+    url.includes("youtube.com") || url.includes("youtu.be");
+};
+
+const resolveToFinalUrl = async (url: string): Promise<string> => {
+  const res = await fetch(url, { redirect: "follow" });
+  return res.url;
+};
+
 const sanitizeUrl = async (url: string): Promise<string> => {
   // Resolve short links (vt.tiktok.com, vm.tiktok.com, ig.me, etc.)
-  const res = await fetch(url, { redirect: "follow" });
-  const finalUrl = res.url;
+  console.log("[IMPORT URL] Final URL:", url);
 
   let minimalUrl = null;
 
   // TikTok → prefer https://www.tiktok.com/@<username>/video/<video_id>
-  if (finalUrl.includes("tiktok.com")) {
+  if (url.includes("tiktok.com")) {
     // If username is present, preserve it
-    const withUser = finalUrl.match(/\/@([^/]+)\/video\/(\d+)/);
+    const withUser = url.match(/\/@([^/]+)\/video\/(\d+)/);
     if (withUser) {
       minimalUrl = `https://www.tiktok.com/@${withUser[1]}/video/${
         withUser[2]
       }`;
     } else {
       // Try canonical tag to resolve username form
-      const canonical = await getCanonicalFromHtml(finalUrl, "tiktok");
+      const canonical = await getCanonicalFromHtml(url, "tiktok");
       if (canonical) {
         minimalUrl = canonical;
       } else {
         // Fallback: keep the original URL (without query) if username is missing
-        const idOnly = finalUrl.match(/\/video\/(\d+)/);
+        const idOnly = url.match(/\/video\/(\d+)/);
         if (idOnly) {
-          const u = new URL(finalUrl);
+          const u = new URL(url);
           u.search = "";
           minimalUrl = u.toString();
         }
       }
     }
   } // Instagram → keep only https://www.instagram.com/reel/<shortcode>/ (no username requirement)
-  else if (finalUrl.includes("instagram.com")) {
-    const match = finalUrl.match(/\/reel\/([A-Za-z0-9_-]+)/);
+  else if (url.includes("instagram.com")) {
+    const match = url.match(/\/reel\/([A-Za-z0-9_-]+)/);
     if (match) {
       minimalUrl = `https://www.instagram.com/reel/${match[1]}/`;
     }
-  }
-  else if (finalUrl.includes("youtube.com")) {
-    const match = finalUrl.match(/\/watch\?v=([A-Za-z0-9_-]+)/);
+  } else if (url.includes("youtube.com")) {
+    const match = url.match(/\/watch\?v=([A-Za-z0-9_-]+)/);
+    if (match) {
+      minimalUrl = `https://www.youtube.com/watch?v=${match[1]}`;
+    }
+  } else if (url.includes("youtu.be")) {
+    const match = url.match(/youtu\.be\/([A-Za-z0-9_-]+)/);
     if (match) {
       minimalUrl = `https://www.youtube.com/watch?v=${match[1]}`;
     }
@@ -251,16 +224,25 @@ const sanitizeUrl = async (url: string): Promise<string> => {
   // if it's not tiktok or instagram, return the final URL
   if (!minimalUrl) {
     // Remove the query params from the final URL
-    const urlObj = new URL(finalUrl);
+    const urlObj = new URL(url);
     urlObj.search = "";
     minimalUrl = urlObj.toString();
     return minimalUrl;
   }
 
-  console.log("🔍 Final URL:", minimalUrl);
+  console.log("[IMPORT URL] Minimal URL:", minimalUrl);
 
   return minimalUrl;
 };
+
+async function findUserProfileByEmail(supabase: SupabaseClient, email: string) {
+  const { data, error } = await supabase
+    .from("user_profile")
+    .select("*")
+    .eq("email", email)
+    .single();
+  return data;
+}
 
 async function getCanonicalFromHtml(
   pageUrl: string,

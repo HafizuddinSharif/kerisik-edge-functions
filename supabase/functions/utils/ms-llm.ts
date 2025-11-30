@@ -91,9 +91,9 @@ export class MSLLMClient {
         method: "GET" | "POST" | "PUT" | "DELETE" = "POST",
     ): Promise<RestResponse<ImportFromUrlResponse>> {
         const url = `${this.options.baseUrl}${endpoint}`;
-        console.log("🔍 Calling API:", url);
-        console.log("🔍 Request data:", requestData);
-        console.log("🔍 Method:", method);
+        console.log("[MS LLM] Calling API:", url);
+        console.log("[MS LLM] Request data:", requestData);
+        console.log("[MS LLM] Method:", method);
 
         try {
             const controller = new AbortController();
@@ -104,6 +104,7 @@ export class MSLLMClient {
 
             const headers: Record<string, string> = { ...this.options.headers };
             const apiKey = Deno.env.get("MS_LLM_API_KEY");
+            console.log("[MS LLM] API Key:", apiKey);
             if (apiKey) {
                 headers["x-api-key"] = apiKey;
             }
@@ -117,24 +118,25 @@ export class MSLLMClient {
                 signal: controller.signal,
             });
 
-            console.log("🔍 Response:", response);
-
             clearTimeout(timeoutId);
+
+            console.log("[MS LLM] Response Status:", response.status);
+            console.log("[MS LLM] Response Headers:", response.ok);
 
             if (!response.ok) {
                 const error = await response.json();
+                console.log("[MS LLM] Response Error:", error);
                 const errorObj = {
                     success: false,
                     error: error.detail.message,
                     error_code: error.detail.code,
                 } as RestResponse<ImportFromUrlResponse>;
 
-                console.log("🔍 Error object:", error);
-
                 return errorObj;
             }
 
             const data = await response.json();
+            console.log("[MS LLM] Response:", data);
             return data as RestResponse<ImportFromUrlResponse>;
         } catch (error) {
             console.error("🔍 Error:", error);
