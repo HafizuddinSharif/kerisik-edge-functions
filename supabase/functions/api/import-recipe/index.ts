@@ -18,34 +18,50 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  */
 Deno.serve(async (req) => {
   try {
-    console.log("[IMPORT URL] Importing recipe from URL (edge proxy)");
+    console.log("[IMPORT URL] ===== START: Importing recipe from URL (edge proxy) =====");
+    console.log("[IMPORT URL] Request method:", req.method);
+    console.log("[IMPORT URL] Request URL:", req.url);
+
     const { url, email } = await req.json();
-    console.log("[IMPORT URL] Email:", email);
+    console.log("[IMPORT URL] Received URL:", url);
+    console.log("[IMPORT URL] Received email:", email);
 
     // Authenticate user via Supabase (read-only, no DB writes)
+    console.log("[IMPORT URL] Creating Supabase admin client...");
     const supabase = createSupabaseAdminClient();
-    if (!shouldBypassAuth()) {
+    console.log("[IMPORT URL] Supabase admin client created");
+
+    const bypassAuth = shouldBypassAuth();
+    console.log("[IMPORT URL] Auth bypass check:", bypassAuth);
+
+    if (!bypassAuth) {
+      console.log("[IMPORT URL] Authenticating user...");
       try {
-        await getAuthenticatedUserIdOrThrow(supabase, req);
+        const userId = await getAuthenticatedUserIdOrThrow(supabase, req);
+        console.log("[IMPORT URL] Authentication successful, user ID:", userId);
       } catch (authErr) {
+        console.error("[IMPORT URL] Authentication failed:", authErr);
         const message = authErr instanceof Error ? authErr.message : "Unauthorized";
         return jsonError(message, 401);
       }
+    } else {
+      console.log("[IMPORT URL] Auth bypassed (DEV mode)");
     }
 
     // Sanitize the URL to remove unnecessary parameters / resolve redirects
-    let resolved = url;
-    if (!checkIfUrlIsAllowed(url)) {
-      console.log("[IMPORT URL] URL is not youtube or tiktok:", url);
-      resolved = await resolveToFinalUrl(url);
-    }
+    console.log("[IMPORT URL] Starting URL sanitization...");
+    const resolved = await resolveToFinalUrl(url);
     const sanitizedUrl = await sanitizeUrl(resolved);
-    console.log("[IMPORT URL] URL:", url);
+    console.log("[IMPORT URL] Original URL:", url);
+    console.log("[IMPORT URL] Resolved URL:", resolved);
     console.log("[IMPORT URL] Sanitized URL:", sanitizedUrl);
 
     // Proxy call to FastAPI backend which owns imported_content writes
+    console.log("[IMPORT URL] Preparing backend proxy call...");
     const backendBaseUrl = Deno.env.get("MS_LLM_BASE_URL") ?? "http://host.docker.internal:8000";
     const backendUrl = `${backendBaseUrl}/api/v2/import-from-url`;
+    console.log("[IMPORT URL] Backend base URL:", backendBaseUrl);
+    console.log("[IMPORT URL] Backend URL:", backendUrl);
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -53,20 +69,29 @@ Deno.serve(async (req) => {
     const apiKey = Deno.env.get("MS_LLM_API_KEY");
     if (apiKey) {
       headers["x-api-key"] = apiKey;
+      console.log("[IMPORT URL] API key found, added to headers");
+    } else {
+      console.log("[IMPORT URL] No API key found in environment");
     }
 
+    const requestBody = {
+      url: sanitizedUrl,
+      email,
+      mode: "async",
+    };
+    console.log("[IMPORT URL] Request body:", JSON.stringify(requestBody));
+
+    console.log("[IMPORT URL] Calling backend with retry logic...");
     const backendResponse = await fetchWithRetry(backendUrl, {
       method: "POST",
       headers,
-      body: JSON.stringify({
-        url: sanitizedUrl,
-        email,
-        mode: "async",
-      }),
+      body: JSON.stringify(requestBody),
     });
+
 
     const body = await backendResponse.text();
 
+    console.log("[IMPORT URL] ===== END: Returning response to client =====");
     return new Response(body, {
       status: backendResponse.status,
       headers: {
@@ -74,7 +99,10 @@ Deno.serve(async (req) => {
       },
     });
   } catch (error) {
-    console.error("[IMPORT URL] Error in import-from-url edge proxy:", error);
+    console.error("[IMPORT URL] ===== ERROR: Exception caught in main handler =====");
+    console.error("[IMPORT URL] Error type:", error?.constructor?.name);
+    console.error("[IMPORT URL] Error message:", error instanceof Error ? error.message : String(error));
+    console.error("[IMPORT URL] Error stack:", error instanceof Error ? error.stack : "No stack trace");
     const message = error instanceof Error ? error.message : "Unknown error";
     return jsonError(message, 500);
   }
@@ -96,58 +124,89 @@ function isDevelopment(): boolean {
 }
 
 function shouldBypassAuth(): boolean {
-  return isDevelopment() && getBooleanEnv("IMPORT_RECIPE_NO_AUTH", false);
+  const isDev = isDevelopment();
+  const noAuth = getBooleanEnv("IMPORT_RECIPE_NO_AUTH", false);
+  const result = isDev && noAuth;
+  console.log("[IMPORT URL] shouldBypassAuth check:", { isDev, noAuth, result });
+  return result;
 }
 
 function createSupabaseAdminClient(): SupabaseClient {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  console.log("[IMPORT URL] Creating Supabase client with URL:", supabaseUrl ? `${supabaseUrl.substring(0, 20)}...` : "MISSING");
+  console.log("[IMPORT URL] Service key present:", !!supabaseServiceKey);
+  if (!supabaseUrl || !supabaseServiceKey) {
+    console.error("[IMPORT URL] Missing Supabase environment variables!");
+  }
   return createClient(supabaseUrl, supabaseServiceKey);
 }
 
 async function getAuthenticatedUserIdOrThrow(supabase: SupabaseClient, req: Request): Promise<string> {
+  console.log("[IMPORT URL] getAuthenticatedUserIdOrThrow: Starting authentication...");
   const user = await getAuthenticatedUserOrThrow(supabase, req);
+  console.log("[IMPORT URL] getAuthenticatedUserIdOrThrow: Auth user ID:", user.id);
+
+  console.log("[IMPORT URL] getAuthenticatedUserIdOrThrow: Querying user_profile...");
   const { data: profile, error } = await supabase.from("user_profile").select("id").eq("auth_id", user.id).single();
 
   if (error || !profile) {
-    console.error("User profile not found for auth user", {
+    console.error("[IMPORT URL] getAuthenticatedUserIdOrThrow: User profile not found", {
       authUserId: user.id,
-      error,
+      error: error?.message || error,
+      errorCode: error?.code,
+      profileFound: !!profile,
     });
     throw new Error("User profile not found");
   }
 
+  console.log("[IMPORT URL] getAuthenticatedUserIdOrThrow: Profile found, ID:", profile.id);
   return profile.id as string;
 }
 
 async function fetchWithRetry(url: string, init: RequestInit, maxAttempts = 3, baseDelayMs = 200): Promise<Response> {
+  console.log("[IMPORT URL] fetchWithRetry: Starting fetch with retry logic", {
+    url,
+    maxAttempts,
+    baseDelayMs,
+    method: init.method,
+  });
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
+      console.log(`[IMPORT URL] fetchWithRetry: Making fetch request to ${url}`);
       const res = await fetch(url, init);
+      console.log(`[IMPORT URL] fetchWithRetry: Response received, status: ${res.status}`);
 
       // If it's a success or a non-retryable error, return immediately
-      if (!shouldRetryResponse(res) || attempt === maxAttempts) {
+      const shouldRetry = shouldRetryResponse(res);
+      console.log(`[IMPORT URL] fetchWithRetry: Should retry: ${shouldRetry}, is last attempt: ${attempt === maxAttempts}`);
+
+      if (!shouldRetry || attempt === maxAttempts) {
+        console.log(`[IMPORT URL] fetchWithRetry: Returning response (status: ${res.status})`);
         return res;
       }
 
-      console.warn(`[IMPORT URL] Backend responded with ${res.status}, retrying (${attempt}/${maxAttempts})`);
+      console.warn(`[IMPORT URL] fetchWithRetry: Backend responded with ${res.status}, retrying (${attempt}/${maxAttempts})`);
     } catch (err) {
       lastError = err;
+      console.error(`[IMPORT URL] fetchWithRetry: Fetch error on attempt ${attempt}:`, err);
 
       if (attempt === maxAttempts) {
-        console.error("[IMPORT URL] Failed to reach backend after retries:", err);
+        console.error("[IMPORT URL] fetchWithRetry: Failed to reach backend after all retries");
         throw err;
       }
 
-      console.warn(`[IMPORT URL] Network error calling backend, retrying (${attempt}/${maxAttempts})`, err);
+      console.warn(`[IMPORT URL] fetchWithRetry: Network error calling backend, retrying (${attempt}/${maxAttempts})`);
     }
 
     const delay = baseDelayMs * attempt;
+    console.log(`[IMPORT URL] fetchWithRetry: Waiting ${delay}ms before next attempt...`);
     await new Promise((resolve) => setTimeout(resolve, delay));
   }
 
+  console.error("[IMPORT URL] fetchWithRetry: Exhausted all retries, throwing error");
   throw lastError instanceof Error ? lastError : new Error("Unknown fetch error after retries");
 }
 
@@ -182,20 +241,18 @@ function jsonError(message: string, status = 500, error_code: string | null = nu
   });
 }
 
-const checkIfUrlIsAllowed = (url: string): boolean => {
-  return url.includes("tiktok.com") || url.includes("instagram.com") || url.includes("youtube.com") || url.includes("youtu.be");
-};
-
 const resolveToFinalUrl = async (url: string): Promise<string> => {
-  const res = await fetch(url, { redirect: "follow" });
-  return res.url;
+  try {
+    const res = await fetch(url, { redirect: "follow" });
+    return res.url;
+  } catch (error) {
+    throw error;
+  }
 };
 
 const sanitizeUrl = async (url: string): Promise<string> => {
-  // Resolve short links (vt.tiktok.com, vm.tiktok.com, ig.me, etc.)
-  console.log("[IMPORT URL] Final URL:", url);
 
-  let minimalUrl = null;
+  let minimalUrl: string | null = null;
 
   // TikTok → prefer https://www.tiktok.com/@<username>/video/<video_id>
   if (url.includes("tiktok.com")) {
@@ -245,8 +302,6 @@ const sanitizeUrl = async (url: string): Promise<string> => {
     return minimalUrl;
   }
 
-  console.log("[IMPORT URL] Minimal URL:", minimalUrl);
-
   return minimalUrl;
 };
 
@@ -265,15 +320,17 @@ async function getCanonicalFromHtml(pageUrl: string, platform: "tiktok"): Promis
       },
     });
     const html = await resp.text();
+
     if (platform === "tiktok") {
       const m = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["'](https?:\/\/www\.tiktok\.com\/@[^"']+?\/video\/\d+)["']/i);
       if (m) {
         const u = new URL(m[1]);
         u.search = "";
-        return u.toString();
+        const canonicalUrl = u.toString();
+        return canonicalUrl;
       }
     }
-  } catch (_err) {
+  } catch (err) {
     // ignore parsing/network errors; caller will fallback
   }
   return null;
