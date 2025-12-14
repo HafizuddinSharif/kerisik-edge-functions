@@ -279,7 +279,7 @@ const sanitizeUrl = async (url: string): Promise<string> => {
   else if (url.includes("instagram.com")) {
     const match = url.match(/\/reel\/([A-Za-z0-9_-]+)/);
     if (match) {
-      minimalUrl = `https://www.instagram.com/reel/${match[1]}/`;
+      minimalUrl = `https://www.instagram.com/p/${match[1]}/`;
     }
   } else if (url.includes("youtube.com")) {
     const match = url.match(/\/watch\?v=([A-Za-z0-9_-]+)/);
