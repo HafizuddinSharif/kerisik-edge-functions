@@ -344,3 +344,9 @@ entrypoint = "./functions/api/health-check/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/health-check/*.html" ]
+
+[functions.delete-account]
+enabled = true
+verify_jwt = true
+import_map = "./functions/api/delete-account/deno.json"
+entrypoint = "./functions/api/delete-account/index.ts"

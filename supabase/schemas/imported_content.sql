@@ -6,7 +6,7 @@ CREATE TYPE public.imported_content_status AS ENUM ('PROCESSING', 'COMPLETED', '
 -- Create table for storing imported content from URLs
 CREATE TABLE IF NOT EXISTS public.imported_content (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id uuid REFERENCES public.user_profile(id) ON DELETE CASCADE,
+    user_id uuid, -- No FK constraint to allow anonymization (setting to NULL) when deleting accounts
     source_url text NOT NULL,
     content jsonb,
     metadata jsonb,
@@ -55,6 +55,16 @@ FOR UPDATE
 TO authenticated
 USING (
   EXISTS (
+    SELECT 1
+    FROM public.user_profile up
+    WHERE up.id = user_id
+      AND up.auth_id = auth.uid()
+  )
+)
+WITH CHECK (
+  -- Prevent changing ownership: user_id must remain the same and cannot be set to NULL
+  user_id IS NOT NULL
+  AND EXISTS (
     SELECT 1
     FROM public.user_profile up
     WHERE up.id = user_id
