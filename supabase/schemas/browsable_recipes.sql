@@ -37,9 +37,7 @@ CREATE TABLE IF NOT EXISTS public.browsable_recipes (
     serving_suggestions integer,
     
     -- Social media metadata
-    author_name text,
-    author_handle text,
-    author_profile_url text,
+    author_id uuid,
     platform social_media_platform NOT NULL,
     original_post_url text NOT NULL,
     posted_date timestamp with time zone,
@@ -80,6 +78,10 @@ CREATE TABLE IF NOT EXISTS public.browsable_recipes (
     CONSTRAINT fk_curator 
         FOREIGN KEY (curator_id) 
         REFERENCES public.user_profile(id) 
+        ON DELETE SET NULL,
+    CONSTRAINT fk_author 
+        FOREIGN KEY (author_id) 
+        REFERENCES public.authors(id) 
         ON DELETE SET NULL,
     CONSTRAINT unique_browsable_recipe 
         UNIQUE (imported_content_id)

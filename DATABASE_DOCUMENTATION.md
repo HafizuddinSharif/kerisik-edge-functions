@@ -19,9 +19,11 @@
 
 ## Overview
 
-The database consists of two main tables:
+The database consists of several main tables:
 - **user_profile**: Stores user account information and preferences
 - **imported_content**: Stores content imported from external URLs (recipes, videos, etc.)
+- **authors**: Stores content creator/author information for recipe attribution
+- **browsable_recipes**: Stores curated recipes available for browsing with enriched social metadata
 
 The database uses Row Level Security (RLS) to enforce access control, and includes several helper functions for user management and content tracking.
 
@@ -238,6 +240,51 @@ SELECT create_user_profile_from_email('user@example.com');
 
 ---
 
+### authors
+
+Stores content creator/author information for recipe attribution. Deduplicated by platform and profile URL.
+
+**Columns:**
+
+| Column Name | Data Type | Nullable | Default | Description |
+|------------|-----------|----------|---------|-------------|
+| `id` | `uuid` | NO | `gen_random_uuid()` | Primary key |
+| `name` | `text` | YES | `NULL` | Display name of content creator |
+| `handle` | `text` | YES | `NULL` | Social media handle (e.g., @username) |
+| `profile_url` | `text` | YES | `NULL` | Link to author's profile page |
+| `profile_pic_url` | `text` | YES | `NULL` | URL to author's avatar/profile image |
+| `platform` | `social_media_platform` | NO | - | Source platform (tiktok, youtube, instagram, website, other) |
+| `created_at` | `timestamptz` | NO | `now()` | Record creation timestamp |
+| `updated_at` | `timestamptz` | NO | `now()` | Last update timestamp |
+
+**Constraints:**
+- **Primary Key:** `id`
+- **Unique (partial):** `(platform, profile_url)` where `profile_url IS NOT NULL`
+
+**Key Design Notes:**
+- Author identity is scoped by platform (same handle on different platforms = different authors)
+- `profile_pic_url` stores the author's avatar image URL
+- Used by `browsable_recipes` via `author_id` foreign key
+
+**RLS:** Enabled
+
+**Policies:**
+1. **authenticated_read_authors** (SELECT) - All authenticated users can read authors for recipe attribution display
+2. No INSERT/UPDATE/DELETE policies - modifications only via `get_or_create_author()` (SECURITY DEFINER)
+
+---
+
+### browsable_recipes
+
+Stores curated recipes available for browsing with enriched social metadata. See [docs/browse_recipe_feat.md](docs/browse_recipe_feat.md) for full documentation.
+
+**Key relationships:**
+- `imported_content_id` → `imported_content.id`
+- `author_id` → `authors.id`
+- `curator_id` → `user_profile.id`
+
+---
+
 ## Migrations History
 
 The database has evolved through the following migrations:
@@ -259,16 +306,19 @@ The database has evolved through the following migrations:
 11. **20251123122000_update_create_user_on_signup_check_email** - Updated `create_user_on_signup()` to check for existing email
 12. **20251207000000_add_retry_count_to_imported_content** - Added `retry_count` column with default 0
 13. **20251219183841_drop_imported_content_user_id_fk** - Removed foreign key constraint on `imported_content.user_id` to allow anonymization
+14. **20260127000000_create_browsable_recipes** - Created browsable recipes table, custom types, functions, and RLS policies
+15. **20260201000000_create_authors_and_refactor_browsable_recipes** - Created authors table, migrated author data from browsable_recipes, added author_id FK and get_or_create_author function
+16. **20260201100000_add_authors_rls** - Enabled RLS on authors table with authenticated read policy
 
 ---
 
 ## Database Statistics
 
-- **Total Tables:** 2
-- **Total Functions:** 3
+- **Total Tables:** 4 (user_profile, imported_content, authors, browsable_recipes)
+- **Total Functions:** 6
 - **Total Custom Types:** 1 (enum)
-- **RLS Enabled Tables:** 2
-- **Total Migrations:** 13
+- **RLS Enabled Tables:** 4 (user_profile, imported_content, authors, browsable_recipes)
+- **Total Migrations:** 16
 
 ---
 

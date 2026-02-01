@@ -143,10 +143,52 @@ imported_content (existing)
     ↓ (1:1 relationship)
 browsable_recipes (new)
     ↑ references via imported_content_id
-    
+    ↑ references via author_id
+
+authors (new)
+    ↑ browsable_recipes references via author_id
+
 user_profile (existing)
     ↑ (optional) references via curator_id
 ```
+
+### Table: `authors`
+
+**Purpose**: Stores content creator/author information for recipe attribution. Deduplicated by platform and profile URL.
+
+#### Schema
+
+```sql
+CREATE TABLE authors (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT,
+    handle TEXT,
+    profile_url TEXT,
+    profile_pic_url TEXT,
+    platform social_media_platform NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Partial unique index: (platform, profile_url) when profile_url is provided
+CREATE UNIQUE INDEX unique_author_per_platform 
+    ON authors (platform, profile_url) WHERE profile_url IS NOT NULL;
+```
+
+#### Column Descriptions
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | UUID | NO | Primary key |
+| `name` | TEXT | YES | Display name of content creator |
+| `handle` | TEXT | YES | Social media handle (e.g., @username) |
+| `profile_url` | TEXT | YES | Link to author's profile page |
+| `profile_pic_url` | TEXT | YES | URL to author's avatar/profile image |
+| `platform` | ENUM | NO | Source platform (tiktok, youtube, instagram, website) |
+| `created_at` | TIMESTAMPTZ | NO | Record creation timestamp |
+| `updated_at` | TIMESTAMPTZ | NO | Last update timestamp |
+
+---
 
 ### Table: `browsable_recipes`
 
@@ -168,9 +210,7 @@ CREATE TABLE browsable_recipes (
     serving_suggestions INTEGER,
     
     -- Social media metadata
-    author_name TEXT,
-    author_handle TEXT,
-    author_profile_url TEXT,
+    author_id UUID,
     platform social_media_platform NOT NULL,
     original_post_url TEXT NOT NULL,
     posted_date TIMESTAMPTZ,
@@ -212,6 +252,10 @@ CREATE TABLE browsable_recipes (
         FOREIGN KEY (curator_id) 
         REFERENCES user_profile(id) 
         ON DELETE SET NULL,
+    CONSTRAINT fk_author 
+        FOREIGN KEY (author_id) 
+        REFERENCES authors(id) 
+        ON DELETE SET NULL,
     CONSTRAINT unique_browsable_recipe 
         UNIQUE (imported_content_id)
 );
@@ -228,9 +272,7 @@ CREATE TABLE browsable_recipes (
 | `image_url` | TEXT | YES | NULL | Main recipe image URL |
 | `cooking_time` | INTEGER | YES | NULL | Total cooking time in minutes |
 | `serving_suggestions` | INTEGER | YES | NULL | Number of servings |
-| `author_name` | TEXT | YES | NULL | Display name of content creator |
-| `author_handle` | TEXT | YES | NULL | Social media handle (e.g., @username) |
-| `author_profile_url` | TEXT | YES | NULL | Link to author's profile |
+| `author_id` | UUID | YES | NULL | FK to authors.id - content creator |
 | `platform` | ENUM | NO | - | Source platform (tiktok, youtube, instagram, website) |
 | `original_post_url` | TEXT | NO | - | Original URL of the recipe |
 | `posted_date` | TIMESTAMPTZ | YES | NULL | When the content was posted on social media |
@@ -269,6 +311,7 @@ CREATE INDEX idx_browsable_recipes_meal_type ON browsable_recipes(meal_type);
 -- Foreign key indexes
 CREATE INDEX idx_browsable_recipes_imported_content ON browsable_recipes(imported_content_id);
 CREATE INDEX idx_browsable_recipes_curator ON browsable_recipes(curator_id);
+CREATE INDEX idx_browsable_recipes_author ON browsable_recipes(author_id);
 ```
 
 ### Custom Types
@@ -364,6 +407,31 @@ CREATE TYPE recipe_difficulty AS ENUM (
 
 ## Database Functions
 
+### Function: `get_or_create_author()`
+
+Finds an existing author by platform and profile URL (or handle), or creates a new one.
+
+```sql
+CREATE OR REPLACE FUNCTION get_or_create_author(
+    p_platform social_media_platform,
+    p_name TEXT DEFAULT NULL,
+    p_handle TEXT DEFAULT NULL,
+    p_profile_url TEXT DEFAULT NULL,
+    p_profile_pic_url TEXT DEFAULT NULL
+) RETURNS UUID
+```
+
+**Parameters:**
+- `p_platform` - Social media platform
+- `p_name` - Display name
+- `p_handle` - Social handle (e.g. @username)
+- `p_profile_url` - Link to author's profile
+- `p_profile_pic_url` - URL to author's avatar image
+
+**Returns:** UUID of the author (existing or newly created)
+
+---
+
 ### Function: `create_browsable_recipe()`
 
 Creates a new browsable recipe from an imported content record.
@@ -373,6 +441,8 @@ CREATE OR REPLACE FUNCTION create_browsable_recipe(
     p_imported_content_id UUID,
     p_author_name TEXT DEFAULT NULL,
     p_author_handle TEXT DEFAULT NULL,
+    p_author_profile_url TEXT DEFAULT NULL,
+    p_author_profile_pic_url TEXT DEFAULT NULL,
     p_platform social_media_platform DEFAULT 'website',
     p_tags TEXT[] DEFAULT '{}',
     p_curator_id UUID DEFAULT NULL
@@ -385,6 +455,7 @@ DECLARE
     v_content JSONB;
     v_metadata JSONB;
     v_source_url TEXT;
+    v_author_id UUID;
 BEGIN
     -- Fetch the imported content
     SELECT content, metadata, source_url
@@ -398,6 +469,15 @@ BEGIN
         RAISE EXCEPTION 'Recipe content not found or not completed';
     END IF;
     
+    -- Resolve author_id via get_or_create_author if author info provided
+    v_author_id := NULL;
+    IF p_author_name IS NOT NULL OR p_author_handle IS NOT NULL OR p_author_profile_url IS NOT NULL THEN
+        v_author_id := get_or_create_author(
+            p_platform, p_author_name, p_author_handle,
+            p_author_profile_url, p_author_profile_pic_url
+        );
+    END IF;
+    
     -- Insert browsable recipe
     INSERT INTO browsable_recipes (
         imported_content_id,
@@ -406,8 +486,7 @@ BEGIN
         image_url,
         cooking_time,
         serving_suggestions,
-        author_name,
-        author_handle,
+        author_id,
         platform,
         original_post_url,
         tags,
@@ -420,8 +499,7 @@ BEGIN
         v_content->>'image_url',
         (v_content->>'cooking_time')::INTEGER,
         (v_content->>'serving_suggestions')::INTEGER,
-        p_author_name,
-        p_author_handle,
+        v_author_id,
         p_platform,
         v_source_url,
         p_tags,
@@ -569,7 +647,8 @@ CREATE TYPE recipe_difficulty AS ENUM (
     'hard'
 );
 
--- Step 2: Create browsable_recipes table
+-- Step 2: Create authors table (see migration 20260201000000)
+-- Step 3: Create browsable_recipes table
 CREATE TABLE browsable_recipes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     imported_content_id UUID NOT NULL,
@@ -580,9 +659,7 @@ CREATE TABLE browsable_recipes (
     cooking_time INTEGER,
     serving_suggestions INTEGER,
     
-    author_name TEXT,
-    author_handle TEXT,
-    author_profile_url TEXT,
+    author_id UUID,
     platform social_media_platform NOT NULL,
     original_post_url TEXT NOT NULL,
     posted_date TIMESTAMPTZ,
@@ -618,11 +695,15 @@ CREATE TABLE browsable_recipes (
         FOREIGN KEY (curator_id) 
         REFERENCES user_profile(id) 
         ON DELETE SET NULL,
+    CONSTRAINT fk_author 
+        FOREIGN KEY (author_id) 
+        REFERENCES authors(id) 
+        ON DELETE SET NULL,
     CONSTRAINT unique_browsable_recipe 
         UNIQUE (imported_content_id)
 );
 
--- Step 3: Create indexes
+-- Step 4: Create indexes
 CREATE INDEX idx_browsable_recipes_platform ON browsable_recipes(platform);
 CREATE INDEX idx_browsable_recipes_visibility ON browsable_recipes(visibility_status);
 CREATE INDEX idx_browsable_recipes_featured ON browsable_recipes(featured, featured_until);
@@ -633,8 +714,9 @@ CREATE INDEX idx_browsable_recipes_cuisine ON browsable_recipes(cuisine_type);
 CREATE INDEX idx_browsable_recipes_meal_type ON browsable_recipes(meal_type);
 CREATE INDEX idx_browsable_recipes_imported_content ON browsable_recipes(imported_content_id);
 CREATE INDEX idx_browsable_recipes_curator ON browsable_recipes(curator_id);
+CREATE INDEX idx_browsable_recipes_author ON browsable_recipes(author_id);
 
--- Step 4: Create trigger for updated_at
+-- Step 5: Create trigger for updated_at
 CREATE OR REPLACE FUNCTION update_browsable_recipes_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -648,21 +730,25 @@ CREATE TRIGGER trigger_update_browsable_recipes_timestamp
     FOR EACH ROW
     EXECUTE FUNCTION update_browsable_recipes_updated_at();
 
--- Step 5: Create helper functions (see Database Functions section above)
+-- Step 6: Create helper functions (see Database Functions section above)
 -- [Functions would be included here in the actual migration]
 ```
 
 ### Rollback Script
 
 ```sql
--- Rollback migration: Drop browsable_recipes infrastructure
+-- Rollback migration: Drop browsable_recipes and authors infrastructure
 DROP TRIGGER IF EXISTS trigger_update_browsable_recipes_timestamp ON browsable_recipes;
 DROP FUNCTION IF EXISTS update_browsable_recipes_updated_at();
-DROP FUNCTION IF EXISTS create_browsable_recipe(UUID, TEXT, TEXT, social_media_platform, TEXT[], UUID);
+DROP FUNCTION IF EXISTS create_browsable_recipe(UUID, TEXT, TEXT, TEXT, TEXT, social_media_platform, TEXT[], UUID);
+DROP FUNCTION IF EXISTS get_or_create_author(social_media_platform, TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS publish_browsable_recipe(UUID);
 DROP FUNCTION IF EXISTS increment_recipe_views(UUID);
 DROP FUNCTION IF EXISTS get_published_recipes(INTEGER, INTEGER, social_media_platform, TEXT[]);
 DROP TABLE IF EXISTS browsable_recipes;
+DROP TRIGGER IF EXISTS trigger_update_authors_timestamp ON authors;
+DROP FUNCTION IF EXISTS update_authors_updated_at();
+DROP TABLE IF EXISTS authors;
 DROP TYPE IF EXISTS recipe_difficulty;
 DROP TYPE IF EXISTS visibility_status;
 DROP TYPE IF EXISTS social_media_platform;
@@ -748,6 +834,23 @@ USING (
 -- Intentionally no DELETE policy to prevent accidental data loss
 ```
 
+#### authors table
+
+```sql
+-- Enable RLS on authors
+ALTER TABLE authors ENABLE ROW LEVEL SECURITY;
+
+-- Authenticated users can read all authors (for recipe attribution display)
+CREATE POLICY "authenticated_read_authors"
+ON authors
+FOR SELECT
+TO authenticated
+USING (true);
+```
+
+- **SELECT**: All authenticated users can read authors (public attribution data)
+- **INSERT/UPDATE/DELETE**: No policies — modifications only via `get_or_create_author()` (SECURITY DEFINER)
+
 ### Security Considerations
 
 1. **Data Privacy**: 
@@ -786,7 +889,7 @@ USING (
 | Metric | Target | Measurement |
 |--------|--------|-------------|
 | Required field completeness | 100% for meal_name, platform, original_post_url | Data validation queries |
-| Optional field completeness | > 70% for author_name, image_url | Completeness audit |
+| Optional field completeness | > 70% for author_id, image_url | Completeness audit |
 | Duplicate recipes | 0 (enforced by unique constraint) | Constraint violations |
 | Valid foreign keys | 100% | Referential integrity checks |
 
@@ -873,9 +976,15 @@ USING (
     "image_url": "supabase://recipe-images/shrimp-garlic-butter.jpg",
     "cooking_time": 15,
     "serving_suggestions": 4,
-    "author_name": "Chef Maria Rodriguez",
-    "author_handle": "@chefmaria",
-    "author_profile_url": "https://tiktok.com/@chefmaria",
+    "author_id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+    "author": {
+        "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+        "name": "Chef Maria Rodriguez",
+        "handle": "@chefmaria",
+        "profile_url": "https://tiktok.com/@chefmaria",
+        "profile_pic_url": "https://example.com/avatar.jpg",
+        "platform": "tiktok"
+    },
     "platform": "tiktok",
     "original_post_url": "https://tiktok.com/@chefmaria/video/1234567890",
     "posted_date": "2026-01-10T18:30:00Z",
@@ -918,17 +1027,21 @@ USING (
 
 ```sql
 SELECT 
-    id,
-    meal_name,
-    image_url,
-    author_name,
-    platform,
-    view_count
-FROM browsable_recipes
-WHERE visibility_status = 'published'
-AND featured = true
-AND (featured_until IS NULL OR featured_until > now())
-ORDER BY published_at DESC
+    br.id,
+    br.meal_name,
+    br.image_url,
+    a.name AS author_name,
+    a.handle AS author_handle,
+    a.profile_url AS author_profile_url,
+    a.profile_pic_url AS author_profile_pic_url,
+    br.platform,
+    br.view_count
+FROM browsable_recipes br
+LEFT JOIN authors a ON br.author_id = a.id
+WHERE br.visibility_status = 'published'
+AND br.featured = true
+AND (br.featured_until IS NULL OR br.featured_until > now())
+ORDER BY br.published_at DESC
 LIMIT 10;
 ```
 
