@@ -1,6 +1,6 @@
 # Supabase Database Documentation
 
-**Last Updated:** December 2024  
+**Last Updated:** February 2026  
 **Database:** Supabase PostgreSQL  
 **Schema:** `public`
 
@@ -10,6 +10,8 @@
 2. [Tables](#tables)
    - [user_profile](#user_profile)
    - [imported_content](#imported_content)
+   - [collections](#collections)
+   - [collection_recipes](#collection_recipes)
 3. [Custom Types](#custom-types)
 4. [Functions](#functions)
 5. [Row Level Security (RLS)](#row-level-security-rls)
@@ -24,8 +26,10 @@ The database consists of several main tables:
 - **imported_content**: Stores content imported from external URLs (recipes, videos, etc.)
 - **authors**: Stores content creator/author information for recipe attribution
 - **browsable_recipes**: Stores curated recipes available for browsing with enriched social metadata
+- **collections**: Stores recipe collection metadata (by author, cuisine, dietary, meal type, or custom)
+- **collection_recipes**: Junction table linking recipes to collections (many-to-many)
 
-The database uses Row Level Security (RLS) to enforce access control, and includes several helper functions for user management and content tracking.
+The database uses Row Level Security (RLS) to enforce access control, and includes several helper functions for user management, content tracking, and collection management.
 
 ---
 
@@ -113,6 +117,34 @@ Enum type for tracking the processing status of imported content.
 
 ---
 
+### collection_type
+
+Enum type for recipe collection categorization.
+
+**Values:**
+- `author` - All recipes from a specific content creator
+- `cuisine` - Cuisine type (e.g. Italian, Thai)
+- `dietary` - Dietary preferences (e.g. vegan, gluten-free)
+- `meal_type` - Meal type (breakfast, lunch, dinner, dessert, snacks)
+- `custom` - User-created collections
+
+**Usage:** Used in the `collections.type` column.
+
+---
+
+### collection_visibility
+
+Enum type for collection visibility.
+
+**Values:**
+- `public` - Visible to all authenticated users
+- `private` - Visible only to owner
+- `unlisted` - Accessible via link only
+
+**Usage:** Used in the `collections.visibility` column.
+
+---
+
 ## Functions
 
 ### create_user_on_signup()
@@ -184,6 +216,88 @@ SELECT create_user_profile_from_email('user@example.com');
 ```
 
 **Note:** This function does not link to an auth user. Use `create_user_on_signup()` for that purpose.
+
+---
+
+### update_collection_recipe_count()
+
+**Type:** Trigger Function  
+**Returns:** `trigger`  
+**Security:** `SECURITY DEFINER`
+
+Maintains `collections.recipe_count` when rows are inserted or deleted in `collection_recipes`. Also updates `collections.updated_at`.
+
+**Trigger:** `trigger_update_collection_recipe_count` on `collection_recipes` (AFTER INSERT OR DELETE).
+
+---
+
+### generate_collection_slug()
+
+**Type:** Trigger Function  
+**Returns:** `trigger`
+
+Auto-generates URL-friendly `collections.slug` from `name` when slug is NULL. Ensures uniqueness by appending a counter if needed.
+
+**Trigger:** `trigger_generate_collection_slug` on `collections` (BEFORE INSERT OR UPDATE OF name).
+
+---
+
+### get_or_create_collection(p_type, p_name, p_author_id, p_description, p_tags)
+
+**Type:** Function  
+**Returns:** `uuid` (collection id)  
+**Security:** `SECURITY DEFINER`  
+**Parameters:**
+- `p_type` (collection_type): author, cuisine, dietary, meal_type, custom
+- `p_name` (text): Collection name
+- `p_author_id` (uuid, optional): Required when type = 'author'
+- `p_description` (text, optional): Description
+- `p_tags` (text[], optional): Searchable tags
+
+Gets existing collection by type+author_id (for author) or type+name (for others), or creates a new one. Used for system collections (author, cuisine, etc.).
+
+**Usage Example:**
+```sql
+SELECT get_or_create_collection('cuisine', 'Italian', NULL, 'Traditional Italian recipes', ARRAY['italian', 'pasta']);
+```
+
+---
+
+### add_recipe_to_collection(p_collection_id, p_recipe_id, p_user_id, p_curator_note, p_is_featured)
+
+**Type:** Function  
+**Returns:** `uuid` (collection_recipes id)  
+**Security:** `SECURITY DEFINER`  
+**Parameters:**
+- `p_collection_id` (uuid): Collection id
+- `p_recipe_id` (uuid): browsable_recipes id
+- `p_user_id` (uuid, optional): user_profile id of who added
+- `p_curator_note` (text, optional): Note
+- `p_is_featured` (boolean, optional): Default false
+
+Adds a recipe to a collection with next sort_order. On conflict (collection_id, recipe_id), updates curator_note, is_featured, added_by_user_id.
+
+**Usage Example:**
+```sql
+SELECT add_recipe_to_collection('collection-uuid', 'recipe-uuid', 'user-uuid', 'Classic recipe', true);
+```
+
+---
+
+### increment_collection_views(p_collection_id)
+
+**Type:** Function  
+**Returns:** `void`  
+**Security:** `SECURITY DEFINER`  
+**Parameters:**
+- `p_collection_id` (uuid): Collection id
+
+Increments `collections.view_count` by 1.
+
+**Usage Example:**
+```sql
+SELECT increment_collection_views('collection-uuid');
+```
 
 ---
 
@@ -285,6 +399,71 @@ Stores curated recipes available for browsing with enriched social metadata. See
 
 ---
 
+### collections
+
+Stores recipe collection metadata and configuration. Collections can be organized by author, cuisine, dietary, meal type, or custom. See [docs/browse_by_collection_feat.md](docs/browse_by_collection_feat.md) for full design.
+
+**Columns:**
+
+| Column Name | Data Type | Nullable | Default | Description |
+|------------|-----------|----------|---------|-------------|
+| `id` | `uuid` | NO | `gen_random_uuid()` | Primary key |
+| `name` | `text` | NO | - | Collection display name |
+| `description` | `text` | YES | `NULL` | Optional description |
+| `type` | `collection_type` | NO | - | author, cuisine, dietary, meal_type, custom |
+| `visibility` | `collection_visibility` | NO | `'public'` | public, private, unlisted |
+| `cover_image_url` | `text` | YES | `NULL` | Cover image URL |
+| `icon` | `text` | YES | `NULL` | Emoji or icon identifier |
+| `color_theme` | `text` | YES | `NULL` | Hex color for UI theming |
+| `created_by_user_id` | `uuid` | YES | `NULL` | Owner (user_profile.id); NULL for system collections |
+| `author_id` | `uuid` | YES | `NULL` | Required when type = 'author' (authors.id) |
+| `recipe_count` | `integer` | NO | `0` | Maintained by trigger |
+| `view_count` | `integer` | NO | `0` | View tracking |
+| `slug` | `text` | YES | `NULL` | URL-friendly identifier (auto-generated) |
+| `tags` | `text[]` | YES | `NULL` | Searchable tags |
+| `created_at` | `timestamptz` | NO | `now()` | Created timestamp |
+| `updated_at` | `timestamptz` | NO | `now()` | Updated timestamp |
+
+**Constraints:**
+- **Primary Key:** `id`
+- **Foreign Keys:** `created_by_user_id` → `user_profile(id)` ON DELETE SET NULL; `author_id` → `authors(id)` ON DELETE CASCADE
+- **Unique:** `slug`
+- **Check:** `valid_collection_ownership` (type = 'author' implies author_id IS NOT NULL); `valid_slug` (slug format)
+
+**Indexes:** type, visibility, created_by_user_id, author_id, slug, GIN(tags), updated_at DESC
+
+**RLS:** Enabled (authenticated: read public/own; insert/update/delete own; system collections via get_or_create_collection SECURITY DEFINER)
+
+---
+
+### collection_recipes
+
+Junction table linking recipes to collections (many-to-many). Supports sort order, curator notes, and featured flag.
+
+**Columns:**
+
+| Column Name | Data Type | Nullable | Default | Description |
+|------------|-----------|----------|---------|-------------|
+| `id` | `uuid` | NO | `gen_random_uuid()` | Primary key |
+| `collection_id` | `uuid` | NO | - | collections.id |
+| `recipe_id` | `uuid` | NO | - | browsable_recipes.id |
+| `sort_order` | `integer` | NO | `0` | Order within collection |
+| `added_by_user_id` | `uuid` | YES | `NULL` | user_profile.id of who added |
+| `curator_note` | `text` | YES | `NULL` | Optional note |
+| `is_featured` | `boolean` | NO | `false` | Featured in collection |
+| `added_at` | `timestamptz` | NO | `now()` | When added |
+
+**Constraints:**
+- **Primary Key:** `id`
+- **Foreign Keys:** `collection_id` → `collections(id)` ON DELETE CASCADE; `recipe_id` → `browsable_recipes(id)` ON DELETE CASCADE; `added_by_user_id` → `user_profile(id)` ON DELETE SET NULL
+- **Unique:** `(collection_id, recipe_id)`
+
+**Indexes:** (collection_id, sort_order), recipe_id, partial (collection_id, is_featured) WHERE is_featured = true
+
+**RLS:** Enabled (authenticated: read public/own collection recipes; insert/update/delete only for own collections)
+
+---
+
 ## Migrations History
 
 The database has evolved through the following migrations:
@@ -309,16 +488,18 @@ The database has evolved through the following migrations:
 14. **20260127000000_create_browsable_recipes** - Created browsable recipes table, custom types, functions, and RLS policies
 15. **20260201000000_create_authors_and_refactor_browsable_recipes** - Created authors table, migrated author data from browsable_recipes, added author_id FK and get_or_create_author function
 16. **20260201100000_add_authors_rls** - Enabled RLS on authors table with authenticated read policy
+17. **20260201110000_add_authors_platform_profile_url_unique_constraint** - Added unique constraint on authors (platform, profile_url)
+18. **20260202000000_create_recipe_collections** - Created recipe collections (collections, collection_recipes), types, functions, triggers, and RLS
 
 ---
 
 ## Database Statistics
 
-- **Total Tables:** 4 (user_profile, imported_content, authors, browsable_recipes)
-- **Total Functions:** 6
-- **Total Custom Types:** 1 (enum)
-- **RLS Enabled Tables:** 4 (user_profile, imported_content, authors, browsable_recipes)
-- **Total Migrations:** 16
+- **Total Tables:** 6 (user_profile, imported_content, authors, browsable_recipes, collections, collection_recipes)
+- **Total Functions:** 11
+- **Total Custom Types:** 3 (imported_content_status, collection_type, collection_visibility)
+- **RLS Enabled Tables:** 6 (user_profile, imported_content, authors, browsable_recipes, collections, collection_recipes)
+- **Total Migrations:** 18
 
 ---
 
@@ -332,7 +513,7 @@ The database has evolved through the following migrations:
 
 4. **Function Security:** All custom functions use `SECURITY DEFINER`, meaning they run with the privileges of the function owner (typically `postgres`), not the caller.
 
-5. **No Triggers:** Currently, there are no database triggers defined. The `create_user_on_signup()` function should be attached as a trigger on `auth.users` if automatic profile creation is desired.
+5. **Triggers:** Collection triggers: `trigger_update_collection_recipe_count` (maintains collections.recipe_count), `trigger_generate_collection_slug` (auto-generates collections.slug). The `create_user_on_signup()` function should be attached as a trigger on `auth.users` if automatic profile creation is desired.
 
 ---
 
