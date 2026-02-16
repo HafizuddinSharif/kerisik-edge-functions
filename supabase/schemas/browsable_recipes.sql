@@ -14,7 +14,8 @@ CREATE TYPE public.visibility_status AS ENUM (
     'draft',
     'published',
     'archived',
-    'removed'
+    'removed',
+    'dev_only'
 );
 
 CREATE TYPE public.recipe_difficulty AS ENUM (
