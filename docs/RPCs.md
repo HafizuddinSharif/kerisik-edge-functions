@@ -41,7 +41,7 @@ List recipes in a collection with optional text search.
 | `p_search` | text | NULL | Search in meal_name, meal_description, tags |
 | `p_include_dev_only` | boolean | false | Include dev_only recipes (use true only in development) |
 
-**Returns:** Table of recipes with author JSON and `total_count`.
+**Returns:** Table of recipes with author JSON, `posted_date`, and `total_count`. Results are sorted by posted_date (newest first; nulls last).
 
 **Grants:** `anon`, `authenticated`
 
@@ -146,7 +146,7 @@ Retrieve published recipes with pagination and optional filters.
 | `p_tags` | text[] | NULL | Filter by tags (overlap) |
 | `p_include_dev_only` | boolean | false | Include dev_only recipes (use true only in development) |
 
-**Returns:** Table of recipes (id, meal_name, meal_description, image_url, cooking_time, platform, tags, view_count, published_at).
+**Returns:** Table of recipes (id, meal_name, meal_description, image_url, cooking_time, platform, tags, view_count, posted_date, published_at). Results are sorted by posted_date (newest first; nulls last).
 
 **Grants:** `authenticated`, `service_role`
 
