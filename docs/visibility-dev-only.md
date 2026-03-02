@@ -2,6 +2,18 @@
 
 Agent-facing summary for development-only visibility. Both `visibility_status` (browsable_recipes) and `collection_visibility` (collections) support `dev_only`.
 
+## Public schema tables
+
+The `public` schema currently contains these tables:
+
+- `user_profile`
+- `imported_content`
+- `browsable_recipes`
+- `authors`
+- `collections`
+- `collection_recipes`
+- `collection_metrics`
+
 ## Migrations
 
 - **`supabase/migrations/20260216000000_add_visibility_dev_only.sql`** — Adds enum value `'dev_only'` to `public.visibility_status` and `public.collection_visibility`. (Enum values are in a separate migration so they can be committed before any function that uses them.)
