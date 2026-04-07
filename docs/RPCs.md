@@ -152,6 +152,27 @@ Retrieve published recipes with pagination and optional filters.
 
 ---
 
+### `search_browsable_recipes`
+
+Ingredient-aware browsable recipe search with pagination and optional filters.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `p_limit` | integer | 20 | Max results |
+| `p_offset` | integer | 0 | Pagination offset |
+| `p_search` | text | NULL | Search in meal_name, meal_description, tags, and imported_content_sub_ingredients.name. Comma/whitespace-separated tokens must all match somewhere in those fields |
+| `p_platform` | social_media_platform | NULL | Filter by platform (`tiktok`, `youtube`, `instagram`, `website`, `other`) |
+| `p_tags` | text[] | NULL | Filter by tags (overlap) |
+| `p_include_dev_only` | boolean | false | Include dev_only recipes (use true only in development) |
+
+**Returns:** Table of recipe summaries (id, meal_name, meal_description, image_url, cooking_time, author_id, author JSON, platform, tags, cuisine_type, difficulty_level, featured, view_count, posted_date). Results are sorted by posted_date (newest first; nulls last). Does not return an exact total count; callers should infer `hasMore` from whether the returned row count is at least `p_limit`. Example: `daging, kunyit, minyak` matches recipes where all three tokens match across recipe text, tags, or ingredient names; `minyak` matches an ingredient such as `minyak sawit`.
+
+**Grants:** `authenticated`, `service_role`
+
+---
+
 ### `create_browsable_recipe`
 
 Create a browsable recipe from imported content.
