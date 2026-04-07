@@ -1,6 +1,6 @@
 # Supabase Database Documentation
 
-**Last Updated:** February 2026  
+**Last Updated:** April 2026  
 **Database:** Supabase PostgreSQL  
 **Schema:** `public`
 
@@ -10,6 +10,8 @@
 2. [Tables](#tables)
    - [user_profile](#user_profile)
    - [imported_content](#imported_content)
+   - [imported_content_ingredients](#imported_content_ingredients)
+   - [imported_content_sub_ingredients](#imported_content_sub_ingredients)
    - [collections](#collections)
    - [collection_recipes](#collection_recipes)
 3. [Custom Types](#custom-types)
@@ -24,6 +26,8 @@
 The database consists of several main tables:
 - **user_profile**: Stores user account information and preferences
 - **imported_content**: Stores content imported from external URLs (recipes, videos, etc.)
+- **imported_content_ingredients**: Stores denormalized ingredient groups extracted from imported recipe JSON
+- **imported_content_sub_ingredients**: Stores denormalized ingredient lines for each imported ingredient group
 - **authors**: Stores content creator/author information for recipe attribution
 - **browsable_recipes**: Stores curated recipes available for browsing with enriched social metadata
 - **collections**: Stores recipe collection metadata (by author, cuisine, dietary, meal type, or custom)
@@ -99,6 +103,65 @@ Stores content imported from external URLs, such as recipes, videos, and other m
 - `user_id` can be NULL to support account deletion while preserving content
 - Content and metadata are stored as JSONB for flexibility
 - Status tracking supports retry logic via `retry_count`
+- `content.ingredients` remains the source of truth, while ingredient rows are denormalized into child tables for faster reads and filtering
+
+---
+
+### imported_content_ingredients
+
+Stores denormalized top-level ingredient groups extracted from `imported_content.content->'ingredients'`.
+
+**Columns:**
+
+| Column Name | Data Type | Nullable | Default | Description |
+|------------|-----------|----------|---------|-------------|
+| `id` | `uuid` | NO | `gen_random_uuid()` | Primary key |
+| `imported_content_id` | `uuid` | NO | `NULL` | Parent imported content record |
+| `group_name` | `text` | NO | `NULL` | Ingredient section name (for example, "Bahan Untuk Kuah Santan") |
+| `sort_order` | `integer` | NO | `NULL` | Zero-based order from the source JSON array |
+| `created_at` | `timestamptz` | NO | `now()` | Timestamp when record was created |
+| `updated_at` | `timestamptz` | NO | `now()` | Timestamp when record was last updated |
+
+**Constraints:**
+- **Primary Key:** `id`
+- **Foreign Key:** `imported_content_id` → `imported_content.id` (ON DELETE CASCADE)
+- **Unique Constraint:** `(imported_content_id, sort_order)`
+
+**RLS:** Enabled
+
+**Key Design Notes:**
+- This is a derived read model; the canonical ingredient payload still lives in `imported_content.content`
+- Rows preserve the original section ordering for deterministic rendering
+
+---
+
+### imported_content_sub_ingredients
+
+Stores denormalized ingredient lines extracted from `imported_content.content->'ingredients'[*].sub_ingredients`.
+
+**Columns:**
+
+| Column Name | Data Type | Nullable | Default | Description |
+|------------|-----------|----------|---------|-------------|
+| `id` | `uuid` | NO | `gen_random_uuid()` | Primary key |
+| `imported_content_ingredient_id` | `uuid` | NO | `NULL` | Parent ingredient group |
+| `name` | `text` | NO | `NULL` | Ingredient name |
+| `quantity` | `text` | YES | `NULL` | Ingredient quantity preserved as imported text |
+| `unit` | `text` | YES | `NULL` | Ingredient unit preserved as imported text |
+| `sort_order` | `integer` | NO | `NULL` | Zero-based order within the ingredient group |
+| `created_at` | `timestamptz` | NO | `now()` | Timestamp when record was created |
+| `updated_at` | `timestamptz` | NO | `now()` | Timestamp when record was last updated |
+
+**Constraints:**
+- **Primary Key:** `id`
+- **Foreign Key:** `imported_content_ingredient_id` → `imported_content_ingredients.id` (ON DELETE CASCADE)
+- **Unique Constraint:** `(imported_content_ingredient_id, sort_order)`
+
+**RLS:** Enabled
+
+**Key Design Notes:**
+- `quantity` stays as text to preserve source values such as fractions or free-form quantities
+- A functional index on `lower(name)` supports ingredient name lookups without extracting JSON
 
 ---
 
@@ -354,6 +417,58 @@ SELECT increment_collection_views('collection-uuid');
 
 ---
 
+### imported_content_ingredients
+
+**RLS Status:** Enabled
+
+**Policies:**
+
+1. **Users can view imported content ingredients** (SELECT)
+   - **Command:** SELECT
+   - **Target:** `authenticated`
+   - **Condition:** `EXISTS (SELECT 1 FROM imported_content ic WHERE ic.id = imported_content_id)`
+   - **Description:** Authenticated users can read denormalized ingredient groups when the parent imported content row is visible
+
+2. **Users can insert imported content ingredients** (INSERT)
+   - **Command:** INSERT
+   - **Target:** `authenticated`
+   - **WITH CHECK:** `EXISTS (SELECT 1 FROM imported_content ic JOIN user_profile up ON up.id = ic.user_id WHERE ic.id = imported_content_id AND up.auth_id = auth.uid())`
+   - **Description:** Only the owner of the parent imported content can insert ingredient groups
+
+3. **Users can update imported content ingredients** (UPDATE)
+   - **Command:** UPDATE
+   - **Target:** `authenticated`
+   - **USING / WITH CHECK:** `EXISTS (SELECT 1 FROM imported_content ic JOIN user_profile up ON up.id = ic.user_id WHERE ic.id = imported_content_id AND up.auth_id = auth.uid())`
+   - **Description:** Only the owner of the parent imported content can update ingredient groups
+
+---
+
+### imported_content_sub_ingredients
+
+**RLS Status:** Enabled
+
+**Policies:**
+
+1. **Users can view imported content sub ingredients** (SELECT)
+   - **Command:** SELECT
+   - **Target:** `authenticated`
+   - **Condition:** `EXISTS (SELECT 1 FROM imported_content_ingredients ici JOIN imported_content ic ON ic.id = ici.imported_content_id WHERE ici.id = imported_content_ingredient_id)`
+   - **Description:** Authenticated users can read ingredient lines when the parent imported content row is visible
+
+2. **Users can insert imported content sub ingredients** (INSERT)
+   - **Command:** INSERT
+   - **Target:** `authenticated`
+   - **WITH CHECK:** `EXISTS (SELECT 1 FROM imported_content_ingredients ici JOIN imported_content ic ON ic.id = ici.imported_content_id JOIN user_profile up ON up.id = ic.user_id WHERE ici.id = imported_content_ingredient_id AND up.auth_id = auth.uid())`
+   - **Description:** Only the owner of the parent imported content can insert ingredient lines
+
+3. **Users can update imported content sub ingredients** (UPDATE)
+   - **Command:** UPDATE
+   - **Target:** `authenticated`
+   - **USING / WITH CHECK:** `EXISTS (SELECT 1 FROM imported_content_ingredients ici JOIN imported_content ic ON ic.id = ici.imported_content_id JOIN user_profile up ON up.id = ic.user_id WHERE ici.id = imported_content_ingredient_id AND up.auth_id = auth.uid())`
+   - **Description:** Only the owner of the parent imported content can update ingredient lines
+
+---
+
 ### authors
 
 Stores content creator/author information for recipe attribution. Deduplicated by platform and profile URL.
@@ -490,16 +605,17 @@ The database has evolved through the following migrations:
 16. **20260201100000_add_authors_rls** - Enabled RLS on authors table with authenticated read policy
 17. **20260201110000_add_authors_platform_profile_url_unique_constraint** - Added unique constraint on authors (platform, profile_url)
 18. **20260202000000_create_recipe_collections** - Created recipe collections (collections, collection_recipes), types, functions, triggers, and RLS
+19. **20260405000000_denormalize_imported_content_ingredients** - Added denormalized ingredient child tables, RLS, indexes, triggers, and backfilled existing imported content JSON
 
 ---
 
 ## Database Statistics
 
-- **Total Tables:** 6 (user_profile, imported_content, authors, browsable_recipes, collections, collection_recipes)
-- **Total Functions:** 11
+- **Total Tables:** 8 (user_profile, imported_content, imported_content_ingredients, imported_content_sub_ingredients, authors, browsable_recipes, collections, collection_recipes)
+- **Total Functions:** 12
 - **Total Custom Types:** 3 (imported_content_status, collection_type, collection_visibility)
-- **RLS Enabled Tables:** 6 (user_profile, imported_content, authors, browsable_recipes, collections, collection_recipes)
-- **Total Migrations:** 18
+- **RLS Enabled Tables:** 8 (user_profile, imported_content, imported_content_ingredients, imported_content_sub_ingredients, authors, browsable_recipes, collections, collection_recipes)
+- **Total Migrations:** 35
 
 ---
 
@@ -509,7 +625,7 @@ The database has evolved through the following migrations:
 
 2. **Anonymization Support:** The `imported_content.user_id` field has no foreign key constraint, allowing it to be set to NULL when deleting user accounts while preserving the content.
 
-3. **RLS Policy Overlap:** The `imported_content` table has overlapping SELECT policies. The "view all" policy effectively grants access to all authenticated users.
+3. **RLS Policy Overlap:** The `imported_content` table has overlapping SELECT policies. The "view all" policy effectively grants access to all authenticated users. The denormalized ingredient tables inherit practical read visibility from that parent table.
 
 4. **Function Security:** All custom functions use `SECURITY DEFINER`, meaning they run with the privileges of the function owner (typically `postgres`), not the caller.
 

@@ -1,89 +1,6 @@
--- Imported Content Table Schema
--- This file defines the imported_content table structure declaratively
+-- Migration: 20260405000000_denormalize_imported_content_ingredients
+-- Description: Denormalize imported_content.content->ingredients into relational child tables.
 
-CREATE TYPE public.imported_content_status AS ENUM ('PROCESSING', 'COMPLETED', 'FAILED');
-
--- Create table for storing imported content from URLs
-CREATE TABLE IF NOT EXISTS public.imported_content (
-    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id uuid, -- No FK constraint to allow anonymization (setting to NULL) when deleting accounts
-    source_url text NOT NULL,
-    content jsonb,
-    metadata jsonb,
-    video_duration integer,
-    is_recipe_content boolean,
-    status imported_content_status,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
--- Enable RLS
-ALTER TABLE public.imported_content ENABLE ROW LEVEL SECURITY;
-
--- Create policy for users to view their own imported content
-CREATE POLICY "Users can view their own imported content"
-ON public.imported_content
-FOR SELECT
-TO authenticated
-USING (
-  EXISTS (
-    SELECT 1
-    FROM public.user_profile up
-    WHERE up.id = user_id
-      AND up.auth_id = auth.uid()
-  )
-);
-
--- Create policy for all authenticated users to view imported content
-CREATE POLICY "Users can view all imported content"
-ON public.imported_content
-FOR SELECT
-TO authenticated
-USING (true);
-
--- Create policy for users to insert their own imported content
-CREATE POLICY "Users can insert their own imported content"
-ON public.imported_content
-FOR INSERT
-TO authenticated
-WITH CHECK (
-  EXISTS (
-    SELECT 1
-    FROM public.user_profile up
-    WHERE up.id = user_id
-      AND up.auth_id = auth.uid()
-  )
-);
-
--- Create policy for users to update their own imported content
-CREATE POLICY "Users can update their own imported content"
-ON public.imported_content
-FOR UPDATE
-TO authenticated
-USING (
-  EXISTS (
-    SELECT 1
-    FROM public.user_profile up
-    WHERE up.id = user_id
-      AND up.auth_id = auth.uid()
-  )
-)
-WITH CHECK (
-  -- Prevent changing ownership: user_id must remain the same and cannot be set to NULL
-  user_id IS NOT NULL
-  AND EXISTS (
-    SELECT 1
-    FROM public.user_profile up
-    WHERE up.id = user_id
-      AND up.auth_id = auth.uid()
-  )
-);
-
--- Grant permissions
-GRANT ALL ON TABLE public.imported_content TO authenticated;
-GRANT ALL ON TABLE public.imported_content TO service_role;
-
--- Generic trigger to keep updated_at in sync for public tables
 CREATE OR REPLACE FUNCTION public.set_updated_at()
 RETURNS trigger AS $$
 BEGIN
@@ -92,7 +9,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Denormalized ingredient groups extracted from imported_content.content->ingredients
 CREATE TABLE IF NOT EXISTS public.imported_content_ingredients (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     imported_content_id uuid NOT NULL,
@@ -111,12 +27,14 @@ CREATE TABLE IF NOT EXISTS public.imported_content_ingredients (
 CREATE INDEX IF NOT EXISTS idx_imported_content_ingredients_parent_sort
     ON public.imported_content_ingredients (imported_content_id, sort_order);
 
+DROP TRIGGER IF EXISTS set_imported_content_ingredients_updated_at ON public.imported_content_ingredients;
 CREATE TRIGGER set_imported_content_ingredients_updated_at
     BEFORE UPDATE ON public.imported_content_ingredients
     FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 ALTER TABLE public.imported_content_ingredients ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view imported content ingredients" ON public.imported_content_ingredients;
 CREATE POLICY "Users can view imported content ingredients"
 ON public.imported_content_ingredients
 FOR SELECT
@@ -129,6 +47,7 @@ USING (
   )
 );
 
+DROP POLICY IF EXISTS "Users can insert imported content ingredients" ON public.imported_content_ingredients;
 CREATE POLICY "Users can insert imported content ingredients"
 ON public.imported_content_ingredients
 FOR INSERT
@@ -143,6 +62,7 @@ WITH CHECK (
   )
 );
 
+DROP POLICY IF EXISTS "Users can update imported content ingredients" ON public.imported_content_ingredients;
 CREATE POLICY "Users can update imported content ingredients"
 ON public.imported_content_ingredients
 FOR UPDATE
@@ -169,7 +89,6 @@ WITH CHECK (
 GRANT ALL ON TABLE public.imported_content_ingredients TO authenticated;
 GRANT ALL ON TABLE public.imported_content_ingredients TO service_role;
 
--- Denormalized ingredient lines extracted from imported_content.content->ingredients[*].sub_ingredients
 CREATE TABLE IF NOT EXISTS public.imported_content_sub_ingredients (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     imported_content_ingredient_id uuid NOT NULL,
@@ -193,12 +112,14 @@ CREATE INDEX IF NOT EXISTS idx_imported_content_sub_ingredients_parent_sort
 CREATE INDEX IF NOT EXISTS idx_imported_content_sub_ingredients_lower_name
     ON public.imported_content_sub_ingredients (lower(name));
 
+DROP TRIGGER IF EXISTS set_imported_content_sub_ingredients_updated_at ON public.imported_content_sub_ingredients;
 CREATE TRIGGER set_imported_content_sub_ingredients_updated_at
     BEFORE UPDATE ON public.imported_content_sub_ingredients
     FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 ALTER TABLE public.imported_content_sub_ingredients ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view imported content sub ingredients" ON public.imported_content_sub_ingredients;
 CREATE POLICY "Users can view imported content sub ingredients"
 ON public.imported_content_sub_ingredients
 FOR SELECT
@@ -212,6 +133,7 @@ USING (
   )
 );
 
+DROP POLICY IF EXISTS "Users can insert imported content sub ingredients" ON public.imported_content_sub_ingredients;
 CREATE POLICY "Users can insert imported content sub ingredients"
 ON public.imported_content_sub_ingredients
 FOR INSERT
@@ -227,6 +149,7 @@ WITH CHECK (
   )
 );
 
+DROP POLICY IF EXISTS "Users can update imported content sub ingredients" ON public.imported_content_sub_ingredients;
 CREATE POLICY "Users can update imported content sub ingredients"
 ON public.imported_content_sub_ingredients
 FOR UPDATE
@@ -255,27 +178,43 @@ WITH CHECK (
 GRANT ALL ON TABLE public.imported_content_sub_ingredients TO authenticated;
 GRANT ALL ON TABLE public.imported_content_sub_ingredients TO service_role;
 
-create or replace function handle_new_user()
-returns trigger
-language plpgsql
-security definer
-as $$
-begin
-  insert into public.user_profile (
-    id,
-    auth_id,
-    email,
-    is_pro,
-    ai_imports_used
-  )
-  values (
-    gen_random_uuid(), -- new UUID for your internal profile ID
-    new.id,            -- actual auth user ID
-    new.email,
-    false,
-    0
-  );
-
-  return new;
-end;
-$$;
+WITH inserted_groups AS (
+    INSERT INTO public.imported_content_ingredients (
+        imported_content_id,
+        group_name,
+        sort_order
+    )
+    SELECT
+        ic.id,
+        COALESCE(NULLIF(btrim(section.value->>'name'), ''), 'Ingredients'),
+        section.ordinality::integer - 1
+    FROM public.imported_content ic
+    CROSS JOIN LATERAL jsonb_array_elements(ic.content->'ingredients') WITH ORDINALITY AS section(value, ordinality)
+    WHERE jsonb_typeof(ic.content->'ingredients') = 'array'
+    RETURNING id, imported_content_id, sort_order
+)
+INSERT INTO public.imported_content_sub_ingredients (
+    imported_content_ingredient_id,
+    name,
+    quantity,
+    unit,
+    sort_order
+)
+SELECT
+    ig.id,
+    item.value->>'name',
+    NULLIF(btrim(item.value->>'quantity'), ''),
+    NULLIF(btrim(item.value->>'unit'), ''),
+    item.ordinality::integer - 1
+FROM inserted_groups ig
+JOIN public.imported_content ic
+  ON ic.id = ig.imported_content_id
+CROSS JOIN LATERAL jsonb_array_elements(ic.content->'ingredients') WITH ORDINALITY AS section(value, ordinality)
+CROSS JOIN LATERAL jsonb_array_elements(
+    CASE
+        WHEN jsonb_typeof(section.value->'sub_ingredients') = 'array' THEN section.value->'sub_ingredients'
+        ELSE '[]'::jsonb
+    END
+) WITH ORDINALITY AS item(value, ordinality)
+WHERE ig.sort_order = section.ordinality::integer - 1
+  AND NULLIF(btrim(item.value->>'name'), '') IS NOT NULL;
