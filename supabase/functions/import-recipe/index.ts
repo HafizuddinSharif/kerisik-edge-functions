@@ -4,7 +4,7 @@
 
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { getAuthenticatedUserOrThrow } from "../../utils/auth.ts";
+import { getAuthenticatedUserOrThrow } from "../utils/auth.ts";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 /**

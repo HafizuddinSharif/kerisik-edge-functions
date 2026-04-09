@@ -5,8 +5,8 @@
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { getAuthenticatedUserOrThrow } from "../../utils/auth.ts";
-import type { RestResponse } from "../../dto/controller-response.ts";
+import { getAuthenticatedUserOrThrow } from "../utils/auth.ts";
+import type { RestResponse } from "../dto/controller-response.ts";
 
 /**
  * Delete account edge function:

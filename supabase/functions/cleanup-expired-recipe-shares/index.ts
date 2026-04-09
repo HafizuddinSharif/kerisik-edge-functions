@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { RestResponse } from "../../dto/controller-response.ts";
+import type { RestResponse } from "../dto/controller-response.ts";
 
 const SHARED_IMAGE_BUCKET = "shared-recipe-images";
 const DEFAULT_BATCH_SIZE = 100;
