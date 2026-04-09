@@ -107,16 +107,25 @@ Request body:
     "servingSuggestions": 2,
     "ingredients": [
       {
-        "name": "Rice",
-        "quantity": "2",
-        "unit": "cups",
-        "sortOrder": 1
+        "name": "Bahan-bahan Utama",
+        "sortOrder": 1,
+        "sub_ingredients": [
+          {
+            "name": "Rice",
+            "quantity": "2",
+            "unit": "cups",
+            "sortOrder": 1
+          }
+        ]
       }
     ],
     "steps": [
       {
-        "text": "Heat oil",
-        "sortOrder": 1
+        "name": "Cara Memasak",
+        "sortOrder": 1,
+        "sub_steps": [
+          "Heat oil"
+        ]
       }
     ],
     "attribution": {
@@ -147,6 +156,8 @@ Notes:
 - share TTL is fixed at 3 days
 - base URL defaults to `https://kerisik.app/shared/recipe`
 - override via `RECIPE_SHARE_BASE_URL`
+- grouped ingredient and step payloads are preserved in the stored snapshot
+- legacy flat ingredient and step arrays are still accepted and wrapped into a default section
 
 ### `get-shared-recipe`
 
@@ -310,4 +321,3 @@ Not done:
 - no local migration run
 - no deployed function test
 - no end-to-end app wiring yet
-
