@@ -122,7 +122,6 @@ Request body:
     "steps": [
       {
         "name": "Cara Memasak",
-        "sortOrder": 1,
         "sub_steps": [
           "Heat oil"
         ]
@@ -156,7 +155,8 @@ Notes:
 - share TTL is fixed at 3 days
 - base URL defaults to `https://kerisik.app/shared/recipe`
 - override via `RECIPE_SHARE_BASE_URL`
-- grouped ingredient and step payloads are preserved in the stored snapshot
+- grouped ingredient payloads are preserved in the stored snapshot
+- shared recipe step groups are normalized to `sub_steps: string[]` in both create and read paths
 - legacy flat ingredient and step arrays are still accepted and wrapped into a default section
 
 ### `get-shared-recipe`

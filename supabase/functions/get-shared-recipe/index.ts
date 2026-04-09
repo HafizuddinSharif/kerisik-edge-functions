@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
     });
 
     const recipe = {
-      ...row.recipe_payload,
+      ...normalizeSharedRecipePayload(row.recipe_payload),
       imageUrl,
     };
 
@@ -166,6 +166,76 @@ function extractImageUrlFromPayload(
   return typeof imageUrl === "string" && imageUrl.trim().length > 0
     ? imageUrl.trim()
     : null;
+}
+
+function normalizeSharedRecipePayload(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...payload,
+    steps: normalizeSharedRecipeSteps(payload.steps),
+  };
+}
+
+function normalizeSharedRecipeSteps(input: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .map((group) => normalizeSharedRecipeStepGroup(group))
+    .filter(Boolean) as Array<Record<string, unknown>>;
+}
+
+function normalizeSharedRecipeStepGroup(
+  input: unknown,
+): Record<string, unknown> | null {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+
+  const group = input as Record<string, unknown>;
+  const name = asTrimmedString(group.name);
+  const subSteps = normalizeSharedRecipeSubSteps(group.sub_steps);
+
+  if (!name || subSteps.length === 0) {
+    return null;
+  }
+
+  return {
+    name,
+    sub_steps: subSteps,
+  };
+}
+
+function normalizeSharedRecipeSubSteps(input: unknown): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input.map(normalizeSharedRecipeSubStep).filter(Boolean) as string[];
+}
+
+function normalizeSharedRecipeSubStep(input: unknown): string | null {
+  if (typeof input === "string") {
+    return asTrimmedString(input);
+  }
+
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+
+  const step = input as Record<string, unknown>;
+  return asTrimmedString(step.text);
+}
+
+function asTrimmedString(input: unknown): string | null {
+  if (typeof input !== "string") {
+    return null;
+  }
+
+  const trimmed = input.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function corsHeaders(): HeadersInit {

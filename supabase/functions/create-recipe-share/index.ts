@@ -24,15 +24,9 @@ interface SharedRecipeIngredientGroup {
   sortOrder?: number | null;
 }
 
-interface SharedRecipeStep {
-  text: string;
-  sortOrder?: number | null;
-}
-
 interface SharedRecipeStepGroup {
   name: string;
-  sub_steps: SharedRecipeStep[];
-  sortOrder?: number | null;
+  sub_steps: string[];
 }
 
 interface SharedRecipePayload {
@@ -295,21 +289,18 @@ function normalizeIngredientGroup(
   };
 }
 
-function normalizeStep(input: unknown): SharedRecipeStep | null {
+function normalizeStep(input: unknown): string | null {
+  if (typeof input === "string") {
+    return asTrimmedString(input);
+  }
+
   if (!input || typeof input !== "object") {
     return null;
   }
 
   const step = input as Record<string, unknown>;
   const text = asTrimmedString(step.text);
-  if (!text) {
-    return null;
-  }
-
-  return {
-    text,
-    sortOrder: asNullableNumber(step.sortOrder),
-  };
+  return text || null;
 }
 
 function normalizeStepGroups(input: unknown): SharedRecipeStepGroup[] {
@@ -323,9 +314,9 @@ function normalizeStepGroups(input: unknown): SharedRecipeStepGroup[] {
 
   if (!looksGrouped) {
     const legacyItems = input.map(normalizeStep).filter(Boolean) as
-      SharedRecipeStep[];
+      string[];
     return legacyItems.length > 0
-      ? [{ name: "Steps", sub_steps: legacyItems, sortOrder: 1 }]
+      ? [{ name: "Steps", sub_steps: legacyItems }]
       : [];
   }
 
@@ -340,7 +331,7 @@ function normalizeStepGroup(input: unknown): SharedRecipeStepGroup | null {
   const group = input as Record<string, unknown>;
   const name = asTrimmedString(group.name);
   const subSteps = Array.isArray(group.sub_steps)
-    ? group.sub_steps.map(normalizeSubStep).filter(Boolean) as SharedRecipeStep[]
+    ? group.sub_steps.map(normalizeSubStep).filter(Boolean) as string[]
     : [];
 
   if (!name || subSteps.length === 0) {
@@ -350,16 +341,10 @@ function normalizeStepGroup(input: unknown): SharedRecipeStepGroup | null {
   return {
     name,
     sub_steps: subSteps,
-    sortOrder: asNullableNumber(group.sortOrder),
   };
 }
 
-function normalizeSubStep(input: unknown): SharedRecipeStep | null {
-  if (typeof input === "string") {
-    const text = asTrimmedString(input);
-    return text ? { text, sortOrder: null } : null;
-  }
-
+function normalizeSubStep(input: unknown): string | null {
   return normalizeStep(input);
 }
 
