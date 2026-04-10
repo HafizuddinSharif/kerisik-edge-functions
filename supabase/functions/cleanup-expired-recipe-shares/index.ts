@@ -34,6 +34,8 @@ Deno.serve(async (req) => {
     const rows = await getCleanupCandidates(supabase, batchSize);
 
     if (rows.length === 0) {
+      await cleanupRequestWindows(supabase);
+
       return jsonSuccess<CleanupExpiredRecipeSharesResponse>({
         deletedShareCount: 0,
         deletedImageCount: 0,
@@ -76,6 +78,8 @@ Deno.serve(async (req) => {
         );
       }
     }
+
+    await cleanupRequestWindows(supabase);
 
     return jsonSuccess<CleanupExpiredRecipeSharesResponse>({
       deletedShareCount: shareIdsToDelete.length,
@@ -181,6 +185,19 @@ async function deleteSharedImages(
   }
 
   return { deletedPaths };
+}
+
+async function cleanupRequestWindows(supabase: SupabaseClient): Promise<void> {
+  const { error } = await supabase.rpc(
+    "cleanup_shared_recipe_link_request_windows",
+  );
+
+  if (error) {
+    console.error(
+      "[CLEANUP SHARED RECIPE SHARES] Failed to cleanup request windows:",
+      error,
+    );
+  }
 }
 
 function corsHeaders(): HeadersInit {

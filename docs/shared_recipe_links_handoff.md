@@ -170,6 +170,9 @@ Method:
 Auth:
 - not required
 
+Optional header:
+- `x-viewer-id: <anonymous-stable-viewer-id>`
+
 Supported token input:
 - query param: `?token=<token>`
 - last path segment if routed that way upstream
@@ -203,7 +206,10 @@ Possible `status` values:
 Behavior:
 - active shares return payload
 - expired/revoked/not_found return `recipe: null`
-- active reads increment `view_count` through SQL RPC
+- active reads increment `view_count` through SQL RPC with 15-minute dedupe per `share_id + viewer`
+- request rate limit is enforced server-side at `30 requests / minute` per `IP + token`
+- when throttled, the endpoint returns `429` with `RATE_LIMITED`
+- clients should send `x-viewer-id` from web/mobile storage for better view dedupe; requests without it fall back to IP-based dedupe
 
 ### `cleanup-expired-recipe-shares`
 
