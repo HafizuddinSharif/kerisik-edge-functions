@@ -48,8 +48,15 @@ CREATE TABLE IF NOT EXISTS public.browsable_recipes (
     tags text[] DEFAULT '{}',
     cuisine_type text,
     meal_type text, -- breakfast, lunch, dinner, snack, dessert
+    meal_types text[] NOT NULL DEFAULT '{}', -- taxonomy array replacement for meal_type
+    course text[] NOT NULL DEFAULT '{}',
+    main_ingredient text[] NOT NULL DEFAULT '{}',
     dietary_tags text[] DEFAULT '{}', -- vegan, vegetarian, gluten-free, etc.
+    cooking_method text[] NOT NULL DEFAULT '{}',
+    flavor text[] NOT NULL DEFAULT '{}',
+    occasion text[] NOT NULL DEFAULT '{}',
     difficulty_level recipe_difficulty,
+    texture text[] NOT NULL DEFAULT '{}',
     
     -- Platform-specific metadata
     platform_metadata jsonb, -- flexible storage for platform-specific data
