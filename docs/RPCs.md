@@ -173,6 +173,38 @@ Ingredient-aware browsable recipe search with pagination and optional filters.
 
 ---
 
+### `get_onboarding_starter_recipes`
+
+Fetch scored starter recipe candidates for onboarding taxonomy selections, with fallback to popular/newer published recipes.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `p_cuisine_types` | text[] | NULL | Cuisine IDs/names to match case-insensitively |
+| `p_meal_types` | text[] | NULL | Taxonomy meal type IDs to match by overlap |
+| `p_course` | text[] | NULL | Course taxonomy IDs to match by overlap |
+| `p_main_ingredient` | text[] | NULL | Main ingredient taxonomy IDs to match by overlap |
+| `p_dietary_tags` | text[] | NULL | Dietary taxonomy IDs to match by overlap |
+| `p_cooking_method` | text[] | NULL | Cooking method taxonomy IDs to match by overlap |
+| `p_flavor` | text[] | NULL | Flavor taxonomy IDs to match by overlap |
+| `p_occasion` | text[] | NULL | Occasion taxonomy IDs to match by overlap |
+| `p_texture` | text[] | NULL | Texture taxonomy IDs to match by overlap |
+| `p_difficulty_levels` | recipe_difficulty[] | NULL | Difficulty levels to match |
+| `p_tags` | text[] | NULL | Normalized tag aliases to match by overlap |
+| `p_legacy_meal_types` | text[] | NULL | Legacy `meal_type` values to match case-insensitively |
+| `p_max_cooking_time` | integer | NULL | Match recipes at or below this cooking time |
+| `p_limit` | integer | 8 | Max results, clamped to 1-50 |
+| `p_include_dev_only` | boolean | false | Include dev_only recipes (use true only in development) |
+
+Empty array inputs behave like `NULL`.
+
+**Returns:** Table of card-ready recipe rows with taxonomy arrays, author JSON, `published_at`, `match_score`, and `matched_fields`. Results prioritize stronger taxonomy matches, image/cooking-time completeness, saves, views, and recency. The RPC internally fetches a larger candidate pool, de-duplicates by `meal_name`, softly caps cuisine repetition at 2 when enough alternatives exist, and fills with popular/newer recipes when matches are sparse.
+
+**Grants:** `anon`, `authenticated`, `service_role`
+
+---
+
 ### `create_browsable_recipe`
 
 Create a browsable recipe from imported content.
