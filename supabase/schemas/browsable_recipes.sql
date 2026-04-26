@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS public.browsable_recipes (
     
     -- Engagement tracking
     view_count integer DEFAULT 0,
+    like_count integer DEFAULT 0,
     save_count integer DEFAULT 0,
     share_count integer DEFAULT 0,
     
@@ -83,6 +84,8 @@ CREATE TABLE IF NOT EXISTS public.browsable_recipes (
         FOREIGN KEY (imported_content_id) 
         REFERENCES public.imported_content(id) 
         ON DELETE CASCADE,
+    CONSTRAINT browsable_recipes_like_count_non_negative
+        CHECK (like_count >= 0),
     CONSTRAINT fk_curator 
         FOREIGN KEY (curator_id) 
         REFERENCES public.user_profile(id) 
