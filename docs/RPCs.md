@@ -173,6 +173,38 @@ Ingredient-aware browsable recipe search with pagination and optional filters.
 
 ---
 
+### `search_browsable_recipes_filtered`
+
+Deterministic browsable recipe search/list RPC with text search, author filter, taxonomy filters, and pagination metadata.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `p_limit` | integer | 20 | Max results |
+| `p_offset` | integer | 0 | Pagination offset |
+| `p_search` | text | NULL | Search in meal_name, meal_description, tags, and imported_content_sub_ingredients.name. Comma/whitespace-separated tokens must all match somewhere in those fields |
+| `p_author_search` | text | NULL | Case-insensitive substring search against author `name` and `handle` |
+| `p_cuisine_types` | text[] | NULL | Cuisine values to match case-insensitively; any supplied value may match |
+| `p_meal_types` | text[] | NULL | Meal type taxonomy values to match by overlap |
+| `p_main_ingredient` | text[] | NULL | Main ingredient taxonomy values to match by overlap |
+| `p_cooking_method` | text[] | NULL | Cooking method taxonomy values to match by overlap |
+| `p_flavor` | text[] | NULL | Flavor taxonomy values to match by overlap |
+| `p_texture` | text[] | NULL | Texture taxonomy values to match by overlap |
+| `p_dietary_tags` | text[] | NULL | Dietary taxonomy values that must all be present on the recipe |
+| `p_max_cooking_time` | integer | NULL | Match recipes at or below this cooking time |
+| `p_platform` | social_media_platform | NULL | Filter by platform (`tiktok`, `youtube`, `instagram`, `website`, `other`) |
+| `p_tags` | text[] | NULL | Filter by tags (overlap) |
+| `p_include_dev_only` | boolean | false | Include dev_only recipes (use true only in development) |
+
+Empty array inputs behave like `NULL`.
+
+**Returns:** Table of recipe summaries (id, meal_name, meal_description, image_url, cooking_time, author_id, author JSON, platform, tags, cuisine_type, difficulty_level, featured, view_count, posted_date, total_count). Results are sorted by posted_date (newest first; nulls last). `p_search` and `p_author_search` combine with `AND` when both are supplied.
+
+**Grants:** `authenticated`, `service_role`
+
+---
+
 ### `get_onboarding_starter_recipes`
 
 Fetch scored starter recipe candidates for onboarding taxonomy selections, with fallback to popular/newer published recipes.
