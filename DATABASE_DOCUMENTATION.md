@@ -10,6 +10,7 @@
 2. [Tables](#tables)
    - [user_profile](#user_profile)
    - [imported_content](#imported_content)
+   - [llm_token_usage](#llm_token_usage)
    - [imported_content_ingredients](#imported_content_ingredients)
    - [imported_content_sub_ingredients](#imported_content_sub_ingredients)
    - [collections](#collections)
@@ -26,6 +27,7 @@
 The database consists of several main tables:
 - **user_profile**: Stores user account information and preferences
 - **imported_content**: Stores content imported from external URLs (recipes, videos, etc.)
+- **llm_token_usage**: Stores service-only per-call LLM token usage linked to imported content
 - **imported_content_ingredients**: Stores denormalized ingredient groups extracted from imported recipe JSON
 - **imported_content_sub_ingredients**: Stores denormalized ingredient lines for each imported ingredient group
 - **authors**: Stores content creator/author information for recipe attribution
@@ -104,6 +106,45 @@ Stores content imported from external URLs, such as recipes, videos, and other m
 - Content and metadata are stored as JSONB for flexibility
 - Status tracking supports retry logic via `retry_count`
 - `content.ingredients` remains the source of truth, while ingredient rows are denormalized into child tables for faster reads and filtering
+
+---
+
+### llm_token_usage
+
+Stores per-call LLM token usage for imported content processing.
+
+**Columns:**
+
+| Column Name | Data Type | Nullable | Default | Description |
+|------------|-----------|----------|---------|-------------|
+| `id` | `uuid` | NO | `gen_random_uuid()` | Primary key |
+| `imported_content_id` | `uuid` | NO | `NULL` | Parent imported content record |
+| `provider` | `text` | NO | `NULL` | LLM provider, for example `gemini` or `deepseek` |
+| `model` | `text` | NO | `NULL` | Provider model name used for the call |
+| `operation` | `text` | NO | `NULL` | Logical call site, for example `extract_transcript` |
+| `input_tokens` | `integer` | NO | `0` | Prompt/input token count |
+| `output_tokens` | `integer` | NO | `0` | Completion/output token count |
+| `total_tokens` | `integer` | YES | `NULL` | Provider total token count when available |
+| `raw_usage` | `jsonb` | NO | `'{}'::jsonb` | Full provider usage metadata |
+| `created_at` | `timestamptz` | NO | `now()` | Timestamp when record was created |
+| `updated_at` | `timestamptz` | NO | `now()` | Timestamp when record was last updated |
+
+**Constraints:**
+- **Primary Key:** `id`
+- **Foreign Key:** `imported_content_id` -> `imported_content.id` (ON DELETE CASCADE)
+- **Check Constraints:** token count columns must be non-negative
+
+**Indexes:**
+- `idx_llm_token_usage_imported_content_id`
+- `idx_llm_token_usage_created_at`
+- `idx_llm_token_usage_provider_model_operation`
+
+**RLS:** Enabled, service-only. No authenticated or anon client policies should be added by default.
+
+**Key Design Notes:**
+- One row is stored per LLM call, including retries and separate pipeline stages.
+- `operation` is a text label, not a separate lookup table.
+- Usage logging is observability only; application imports should not fail if usage insertion fails.
 
 ---
 
@@ -606,15 +647,16 @@ The database has evolved through the following migrations:
 17. **20260201110000_add_authors_platform_profile_url_unique_constraint** - Added unique constraint on authors (platform, profile_url)
 18. **20260202000000_create_recipe_collections** - Created recipe collections (collections, collection_recipes), types, functions, triggers, and RLS
 19. **20260405000000_denormalize_imported_content_ingredients** - Added denormalized ingredient child tables, RLS, indexes, triggers, and backfilled existing imported content JSON
+20. **20260509000000_create_llm_token_usage** - Added service-only per-call LLM token usage linked to imported content
 
 ---
 
 ## Database Statistics
 
-- **Total Tables:** 8 (user_profile, imported_content, imported_content_ingredients, imported_content_sub_ingredients, authors, browsable_recipes, collections, collection_recipes)
+- **Total Tables:** 9 (user_profile, imported_content, llm_token_usage, imported_content_ingredients, imported_content_sub_ingredients, authors, browsable_recipes, collections, collection_recipes)
 - **Total Functions:** 12
 - **Total Custom Types:** 3 (imported_content_status, collection_type, collection_visibility)
-- **RLS Enabled Tables:** 8 (user_profile, imported_content, imported_content_ingredients, imported_content_sub_ingredients, authors, browsable_recipes, collections, collection_recipes)
+- **RLS Enabled Tables:** 9 (user_profile, imported_content, llm_token_usage, imported_content_ingredients, imported_content_sub_ingredients, authors, browsable_recipes, collections, collection_recipes)
 - **Total Migrations:** 35
 
 ---

@@ -43,6 +43,32 @@ This document lists all tables in the `public` schema with their columns and row
 
 ---
 
+### `llm_token_usage`
+
+**RLS**: enabled
+**Policies**: _none for client roles; service-role only_
+
+**Columns**:
+- `id` — `uuid`, default: `gen_random_uuid()`
+- `imported_content_id` — `uuid`, FK to `imported_content.id` with `ON DELETE CASCADE`
+- `provider` — `text`
+- `model` — `text`
+- `operation` — `text`
+- `input_tokens` — `int4`, default: `0`, non-negative
+- `output_tokens` — `int4`, default: `0`, non-negative
+- `total_tokens` — `int4`, nullable, non-negative
+- `raw_usage` — `jsonb`, default: `'{}'::jsonb`
+- `created_at` — `timestamptz`, default: `now()`
+- `updated_at` — `timestamptz`, default: `now()`
+
+**Notes**:
+- Implemented by `supabase/migrations/20260509000000_create_llm_token_usage.sql`.
+- Stores one row per LLM call related to imported content processing.
+- `operation` is a stable text label for the call site, not a separate table.
+- Intended for backend audit/reporting only; mobile and web clients should not query it directly.
+
+---
+
 ### `browsable_recipes`
 
 **RLS**: enabled  
