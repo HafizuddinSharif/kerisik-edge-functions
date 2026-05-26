@@ -1,6 +1,6 @@
 # Supabase Database Documentation
 
-**Last Updated:** April 2026  
+**Last Updated:** May 2026
 **Database:** Supabase PostgreSQL  
 **Schema:** `public`
 
@@ -10,6 +10,7 @@
 2. [Tables](#tables)
    - [user_profile](#user_profile)
    - [imported_content](#imported_content)
+   - [error_messages](#error_messages)
    - [llm_token_usage](#llm_token_usage)
    - [imported_content_ingredients](#imported_content_ingredients)
    - [imported_content_sub_ingredients](#imported_content_sub_ingredients)
@@ -27,6 +28,7 @@
 The database consists of several main tables:
 - **user_profile**: Stores user account information and preferences
 - **imported_content**: Stores content imported from external URLs (recipes, videos, etc.)
+- **error_messages**: Stores backend-owned import failure display copy by error code and language
 - **llm_token_usage**: Stores service-only per-call LLM token usage linked to imported content
 - **imported_content_ingredients**: Stores denormalized ingredient groups extracted from imported recipe JSON
 - **imported_content_sub_ingredients**: Stores denormalized ingredient lines for each imported ingredient group
@@ -90,6 +92,8 @@ Stores content imported from external URLs, such as recipes, videos, and other m
 | `is_recipe_content` | `boolean` | YES | `NULL` | Whether this content is a recipe |
 | `video_duration` | `integer` | YES | `NULL` | Duration of video content in seconds (if applicable) |
 | `retry_count` | `integer` | NO | `0` | Number of retry attempts for processing |
+| `error_code` | `text` | YES | `NULL` | Backend error code for terminal import failures |
+| `error_display` | `jsonb` | YES | `NULL` | Denormalized user-facing failure copy keyed by language |
 | `created_at` | `timestamptz` | NO | `now()` | Timestamp when record was created |
 | `updated_at` | `timestamptz` | NO | `now()` | Timestamp when record was last updated |
 
@@ -105,7 +109,49 @@ Stores content imported from external URLs, such as recipes, videos, and other m
 - `user_id` can be NULL to support account deletion while preserving content
 - Content and metadata are stored as JSONB for flexibility
 - Status tracking supports retry logic via `retry_count`
+- Terminal import failures store `error_code` and `error_display` snapshots so Realtime clients can render failure copy without a second lookup
 - `content.ingredients` remains the source of truth, while ingredient rows are denormalized into child tables for faster reads and filtering
+
+---
+
+### error_messages
+
+Stores canonical import failure display copy keyed by backend error code and language. FastAPI resolves this catalogue through service-role Supabase access and denormalizes the selected copy into `imported_content.error_display` for terminal import states.
+
+**Columns:**
+
+| Column Name | Data Type | Nullable | Default | Description |
+|------------|-----------|----------|---------|-------------|
+| `error_code` | `text` | NO | `NULL` | Machine-readable backend import error code |
+| `language` | `text` | NO | `NULL` | Display language (`EN` or `BM`) |
+| `title` | `text` | NO | `NULL` | Short user-facing title |
+| `message` | `text` | NO | `NULL` | User-facing explanation |
+| `is_active` | `boolean` | NO | `true` | Whether backend resolution and authenticated reads should use this row |
+| `created_at` | `timestamptz` | NO | `now()` | Timestamp when record was created |
+| `updated_at` | `timestamptz` | NO | `now()` | Timestamp when record was last updated |
+
+**Constraints:**
+- **Primary Key:** `(error_code, language)`
+- **Language Check:** `language IN ('EN', 'BM')`
+- **Non-empty Copy:** `title` and `message` must be non-empty after trimming
+
+**Seeded Error Codes:**
+- `NOT_RECIPE_CONTENT`
+- `VIDEO_TOO_LONG`
+- `NO_CONTENT_FOUND`
+- `UNSUPPORTED_MEDIA_TYPE`
+- `DOMAIN_NOT_ALLOWED`
+- `INVALID_URL`
+- `FIRECRAWL_SCRAPE_FAILED`
+- `IMPORT_RETRY_LIMIT_REACHED`
+- `IMPORT_FAILED`
+
+**RLS:** Enabled
+
+**Key Design Notes:**
+- Authenticated clients can read only active catalogue rows for diagnostics and fallback behavior
+- Client writes are not allowed; `service_role` manages catalogue rows
+- `IMPORT_FAILED` must remain available in both languages as the generic fallback
 
 ---
 
@@ -458,6 +504,25 @@ SELECT increment_collection_views('collection-uuid');
 
 ---
 
+### error_messages
+
+**RLS Status:** Enabled
+
+**Policies:**
+
+1. **Authenticated users can view active error messages** (SELECT)
+   - **Command:** SELECT
+   - **Target:** `authenticated`
+   - **Condition:** `is_active = true`
+   - **Description:** Authenticated clients can read active failure copy rows for diagnostics and fallback behavior
+
+**Permissions:**
+- `authenticated`: SELECT only
+- `service_role`: SELECT, INSERT, UPDATE, DELETE
+- `anon`: no privileges
+
+---
+
 ### imported_content_ingredients
 
 **RLS Status:** Enabled
@@ -648,16 +713,17 @@ The database has evolved through the following migrations:
 18. **20260202000000_create_recipe_collections** - Created recipe collections (collections, collection_recipes), types, functions, triggers, and RLS
 19. **20260405000000_denormalize_imported_content_ingredients** - Added denormalized ingredient child tables, RLS, indexes, triggers, and backfilled existing imported content JSON
 20. **20260509000000_create_llm_token_usage** - Added service-only per-call LLM token usage linked to imported content
+21. **20260526000000_create_error_messages** - Added error message catalogue, terminal import error snapshots on `imported_content`, seeds, RLS, and best-effort backfill
 
 ---
 
 ## Database Statistics
 
-- **Total Tables:** 9 (user_profile, imported_content, llm_token_usage, imported_content_ingredients, imported_content_sub_ingredients, authors, browsable_recipes, collections, collection_recipes)
+- **Total Tables:** 10 (user_profile, imported_content, error_messages, llm_token_usage, imported_content_ingredients, imported_content_sub_ingredients, authors, browsable_recipes, collections, collection_recipes)
 - **Total Functions:** 12
 - **Total Custom Types:** 3 (imported_content_status, collection_type, collection_visibility)
-- **RLS Enabled Tables:** 9 (user_profile, imported_content, llm_token_usage, imported_content_ingredients, imported_content_sub_ingredients, authors, browsable_recipes, collections, collection_recipes)
-- **Total Migrations:** 35
+- **RLS Enabled Tables:** 10 (user_profile, imported_content, error_messages, llm_token_usage, imported_content_ingredients, imported_content_sub_ingredients, authors, browsable_recipes, collections, collection_recipes)
+- **Total Migrations:** 36
 
 ---
 
@@ -671,7 +737,7 @@ The database has evolved through the following migrations:
 
 4. **Function Security:** All custom functions use `SECURITY DEFINER`, meaning they run with the privileges of the function owner (typically `postgres`), not the caller.
 
-5. **Triggers:** Collection triggers: `trigger_update_collection_recipe_count` (maintains collections.recipe_count), `trigger_generate_collection_slug` (auto-generates collections.slug). The `create_user_on_signup()` function should be attached as a trigger on `auth.users` if automatic profile creation is desired.
+5. **Triggers:** Collection triggers: `trigger_update_collection_recipe_count` (maintains collections.recipe_count), `trigger_generate_collection_slug` (auto-generates collections.slug). Error messages use `set_error_messages_updated_at` to maintain `updated_at`. The `create_user_on_signup()` function should be attached as a trigger on `auth.users` if automatic profile creation is desired.
 
 ---
 

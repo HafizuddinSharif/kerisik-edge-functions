@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS public.imported_content (
     video_duration integer,
     is_recipe_content boolean,
     status imported_content_status,
+    error_code text,
+    error_display jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -91,6 +93,41 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Canonical import error display copy keyed by backend error code and language
+CREATE TABLE IF NOT EXISTS public.error_messages (
+    error_code text NOT NULL,
+    language text NOT NULL,
+    title text NOT NULL,
+    message text NOT NULL,
+    is_active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT error_messages_pkey PRIMARY KEY (error_code, language),
+    CONSTRAINT error_messages_language_check
+        CHECK (language IN ('EN', 'BM')),
+    CONSTRAINT error_messages_title_non_empty
+        CHECK (btrim(title) <> ''),
+    CONSTRAINT error_messages_message_non_empty
+        CHECK (btrim(message) <> '')
+);
+
+CREATE TRIGGER set_error_messages_updated_at
+    BEFORE UPDATE ON public.error_messages
+    FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+ALTER TABLE public.error_messages ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Authenticated users can view active error messages"
+ON public.error_messages
+FOR SELECT
+TO authenticated
+USING (is_active = true);
+
+REVOKE ALL ON TABLE public.error_messages FROM anon;
+REVOKE ALL ON TABLE public.error_messages FROM authenticated;
+GRANT SELECT ON TABLE public.error_messages TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.error_messages TO service_role;
 
 -- Denormalized ingredient groups extracted from imported_content.content->ingredients
 CREATE TABLE IF NOT EXISTS public.imported_content_ingredients (
