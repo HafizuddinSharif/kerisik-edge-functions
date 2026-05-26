@@ -50,7 +50,8 @@ Deno.serve(async (req) => {
 
     // Sanitize the URL to remove unnecessary parameters / resolve redirects
     console.log("[IMPORT URL] Starting URL sanitization...");
-    const resolved = await resolveToFinalUrl(url);
+    const redirectUrl = normalizeTikTokShortUrlForRedirect(url);
+    const resolved = await resolveToFinalUrl(redirectUrl);
     const sanitizedUrl = await sanitizeUrl(resolved);
     console.log("[IMPORT URL] Original URL:", url);
     console.log("[IMPORT URL] Resolved URL:", resolved);
@@ -247,6 +248,20 @@ const resolveToFinalUrl = async (url: string): Promise<string> => {
     return res.url;
   } catch (error) {
     throw error;
+  }
+};
+
+const normalizeTikTokShortUrlForRedirect = (url: string): string => {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.toLowerCase() !== "vt.tiktok.com") {
+      return url;
+    }
+
+    parsed.pathname = parsed.pathname.replace(/\/+$/g, "");
+    return parsed.toString();
+  } catch {
+    return url;
   }
 };
 

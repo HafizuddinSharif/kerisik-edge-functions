@@ -47,7 +47,6 @@ export const getAuthenticatedUserOrThrow = async (
     }
 
     const token = authHeader.replace("Bearer ", "");
-    console.log("[AUTH] Token:", token);
     const { data, error: userError } = await supabase.auth.getUser(
         token,
     );
@@ -56,8 +55,7 @@ export const getAuthenticatedUserOrThrow = async (
         throw new Error("Invalid token");
     }
 
-    console.log("[AUTH] data:", data);
-    console.log("[AUTH] Authenticated user:", data.user);
+    console.log("[AUTH] Authenticated user ID:", data.user.id);
 
     return data.user as unknown as User;
 };
