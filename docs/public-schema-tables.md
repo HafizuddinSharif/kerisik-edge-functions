@@ -40,6 +40,8 @@ This document lists all tables in the `public` schema with their columns and row
 - `status` — `imported_content_status`, nullable (`PROCESSING` | `COMPLETED` | `FAILED`)
 - `video_duration` — `int4`, nullable
 - `retry_count` — `int4`, default: `0`
+- `error_code` — `text`, nullable
+- `error_display` — `jsonb`, nullable
 
 ---
 
@@ -196,4 +198,3 @@ This document lists all tables in the `public` schema with their columns and row
 - `views` — `int4`, nullable, default: `0`
 - `recipe_additions` — `int4`, nullable, default: `0`
 - `created_at` — `timestamptz`, default: `now()`
-
