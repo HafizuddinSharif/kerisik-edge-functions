@@ -80,6 +80,7 @@ Seed only codes the backend already emits or needs as safe fallback:
 | --- | --- |
 | `NOT_RECIPE_CONTENT` | LLM decided the URL content is not a recipe. |
 | `VIDEO_TOO_LONG` | Video exceeds the supported duration. |
+| `YOUTUBE_EXTRACTION_FAILED` | All configured yt-dlp YouTube player clients failed. |
 | `NO_CONTENT_FOUND` | Extractor or scraper found no usable content. |
 | `UNSUPPORTED_MEDIA_TYPE` | Platform media type is unsupported, for example mixed Instagram sidecar. |
 | `DOMAIN_NOT_ALLOWED` | URL domain is blocked or unsupported by website extraction. |
