@@ -17,95 +17,111 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  * This function MUST NOT perform any inserts/updates/RPC calls to Supabase.
  */
 Deno.serve(async (req) => {
+  const requestId = crypto.randomUUID();
+  const logPrefix = `[IMPORT URL][${requestId}]`;
   try {
-    console.log("[IMPORT URL] ===== START: Importing recipe from URL (edge proxy) =====");
-    console.log("[IMPORT URL] Request method:", req.method);
-    console.log("[IMPORT URL] Request URL:", req.url);
+    console.log(`${logPrefix} ===== START: Importing recipe from URL (edge proxy) =====`);
+    console.log(`${logPrefix} Request method:`, req.method);
+    console.log(`${logPrefix} Request URL:`, req.url);
 
     const { url, email } = await req.json();
-    console.log("[IMPORT URL] Received URL:", url);
-    console.log("[IMPORT URL] Received email:", email);
+    console.log(`${logPrefix} Received URL:`, url);
+    console.log(`${logPrefix} Received email:`, maskEmail(email));
 
     // Authenticate user via Supabase (read-only, no DB writes)
-    console.log("[IMPORT URL] Creating Supabase admin client...");
+    console.log(`${logPrefix} Creating Supabase admin client...`);
     const supabase = createSupabaseAdminClient();
-    console.log("[IMPORT URL] Supabase admin client created");
+    console.log(`${logPrefix} Supabase admin client created`);
 
     const bypassAuth = shouldBypassAuth();
-    console.log("[IMPORT URL] Auth bypass check:", bypassAuth);
+    console.log(`${logPrefix} Auth bypass check:`, bypassAuth);
 
     if (!bypassAuth) {
-      console.log("[IMPORT URL] Authenticating user...");
+      console.log(`${logPrefix} Authenticating user...`);
       try {
-        const userId = await getAuthenticatedUserIdOrThrow(supabase, req);
-        console.log("[IMPORT URL] Authentication successful, user ID:", userId);
+        const userId = await getAuthenticatedUserIdOrThrow(supabase, req, requestId);
+        console.log(`${logPrefix} Authentication successful, user_profile ID:`, userId);
       } catch (authErr) {
-        console.error("[IMPORT URL] Authentication failed:", authErr);
+        console.error(`${logPrefix} Authentication failed:`, authErr);
         const message = authErr instanceof Error ? authErr.message : "Unauthorized";
-        return jsonError(message, 401);
+        return jsonError(message, 401, null, requestId);
       }
     } else {
-      console.log("[IMPORT URL] Auth bypassed (DEV mode)");
+      console.log(`${logPrefix} Auth bypassed (DEV mode)`);
     }
 
     // Sanitize the URL to remove unnecessary parameters / resolve redirects
-    console.log("[IMPORT URL] Starting URL sanitization...");
+    console.log(`${logPrefix} Starting URL sanitization...`);
     const redirectUrl = normalizeTikTokShortUrlForRedirect(url);
-    const resolved = await resolveToFinalUrl(redirectUrl);
+    console.log(`${logPrefix} Redirect URL candidate:`, redirectUrl);
+    const shouldResolveRedirect = !isYouTubeUrl(redirectUrl);
+    console.log(`${logPrefix} Should resolve redirects:`, shouldResolveRedirect);
+    const resolved = shouldResolveRedirect ? await resolveToFinalUrl(redirectUrl) : redirectUrl;
     const sanitizedUrl = await sanitizeUrl(resolved);
-    console.log("[IMPORT URL] Original URL:", url);
-    console.log("[IMPORT URL] Resolved URL:", resolved);
-    console.log("[IMPORT URL] Sanitized URL:", sanitizedUrl);
+    console.log(`${logPrefix} Original URL:`, url);
+    console.log(`${logPrefix} Resolved URL:`, resolved);
+    console.log(`${logPrefix} Sanitized URL:`, sanitizedUrl);
 
     // Proxy call to FastAPI backend which owns imported_content writes
-    console.log("[IMPORT URL] Preparing backend proxy call...");
+    console.log(`${logPrefix} Preparing backend proxy call...`);
     const backendBaseUrl = Deno.env.get("MS_LLM_BASE_URL") ?? "http://host.docker.internal:8000";
     const backendUrl = `${backendBaseUrl}/api/v2/import-from-url`;
-    console.log("[IMPORT URL] Backend base URL:", backendBaseUrl);
-    console.log("[IMPORT URL] Backend URL:", backendUrl);
+    console.log(`${logPrefix} Backend base URL:`, backendBaseUrl);
+    console.log(`${logPrefix} Backend URL:`, backendUrl);
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      "X-Request-ID": requestId,
     };
     const apiKey = Deno.env.get("MS_LLM_API_KEY");
     if (apiKey) {
       headers["x-api-key"] = apiKey;
-      console.log("[IMPORT URL] API key found, added to headers");
+      console.log(`${logPrefix} API key found, added to headers`);
     } else {
-      console.log("[IMPORT URL] No API key found in environment");
+      console.log(`${logPrefix} No API key found in environment`);
     }
 
     const requestBody = {
       url: sanitizedUrl,
       email,
       mode: "async",
+      request_id: requestId,
     };
-    console.log("[IMPORT URL] Request body:", JSON.stringify(requestBody));
+    console.log(`${logPrefix} Backend request summary:`, {
+      url: requestBody.url,
+      mode: requestBody.mode,
+      emailPresent: !!email,
+      email: maskEmail(email),
+    });
 
-    console.log("[IMPORT URL] Calling backend with retry logic...");
+    console.log(`${logPrefix} Calling backend with retry logic...`);
     const backendResponse = await fetchWithRetry(backendUrl, {
       method: "POST",
       headers,
       body: JSON.stringify(requestBody),
-    });
+    }, requestId);
 
 
     const body = await backendResponse.text();
+    console.log(`${logPrefix} Backend response summary:`, summarizeBackendResponse(body));
+    console.log(`${logPrefix} Backend response status:`, backendResponse.status);
+    console.log(`${logPrefix} Backend response content-type:`, backendResponse.headers.get("Content-Type"));
 
-    console.log("[IMPORT URL] ===== END: Returning response to client =====");
+    console.log(`${logPrefix} ===== END: Returning response to client =====`);
     return new Response(body, {
       status: backendResponse.status,
       headers: {
         "Content-Type": backendResponse.headers.get("Content-Type") ?? "application/json",
+        "X-Request-ID": requestId,
       },
     });
   } catch (error) {
-    console.error("[IMPORT URL] ===== ERROR: Exception caught in main handler =====");
-    console.error("[IMPORT URL] Error type:", error?.constructor?.name);
-    console.error("[IMPORT URL] Error message:", error instanceof Error ? error.message : String(error));
-    console.error("[IMPORT URL] Error stack:", error instanceof Error ? error.stack : "No stack trace");
+    console.error(`${logPrefix} ===== ERROR: Exception caught in main handler =====`);
+    console.error(`${logPrefix} Error type:`, error?.constructor?.name);
+    console.error(`${logPrefix} Error message:`, error instanceof Error ? error.message : String(error));
+    console.error(`${logPrefix} Error stack:`, error instanceof Error ? error.stack : "No stack trace");
     const message = error instanceof Error ? error.message : "Unknown error";
-    return jsonError(message, 500);
+    return jsonError(message, 500, null, requestId);
   }
 });
 
@@ -143,16 +159,17 @@ function createSupabaseAdminClient(): SupabaseClient {
   return createClient(supabaseUrl, supabaseServiceKey);
 }
 
-async function getAuthenticatedUserIdOrThrow(supabase: SupabaseClient, req: Request): Promise<string> {
-  console.log("[IMPORT URL] getAuthenticatedUserIdOrThrow: Starting authentication...");
+async function getAuthenticatedUserIdOrThrow(supabase: SupabaseClient, req: Request, requestId: string): Promise<string> {
+  const logPrefix = `[IMPORT URL][${requestId}]`;
+  console.log(`${logPrefix} getAuthenticatedUserIdOrThrow: Starting authentication...`);
   const user = await getAuthenticatedUserOrThrow(supabase, req);
-  console.log("[IMPORT URL] getAuthenticatedUserIdOrThrow: Auth user ID:", user.id);
+  console.log(`${logPrefix} getAuthenticatedUserIdOrThrow: Auth user ID:`, user.id);
 
-  console.log("[IMPORT URL] getAuthenticatedUserIdOrThrow: Querying user_profile...");
+  console.log(`${logPrefix} getAuthenticatedUserIdOrThrow: Querying user_profile by auth_id...`);
   const { data: profile, error } = await supabase.from("user_profile").select("id").eq("auth_id", user.id).single();
 
   if (error || !profile) {
-    console.error("[IMPORT URL] getAuthenticatedUserIdOrThrow: User profile not found", {
+    console.error(`${logPrefix} getAuthenticatedUserIdOrThrow: User profile not found`, {
       authUserId: user.id,
       error: error?.message || error,
       errorCode: error?.code,
@@ -161,12 +178,13 @@ async function getAuthenticatedUserIdOrThrow(supabase: SupabaseClient, req: Requ
     throw new Error("User profile not found");
   }
 
-  console.log("[IMPORT URL] getAuthenticatedUserIdOrThrow: Profile found, ID:", profile.id);
+  console.log(`${logPrefix} getAuthenticatedUserIdOrThrow: Profile found, ID:`, profile.id);
   return profile.id as string;
 }
 
-async function fetchWithRetry(url: string, init: RequestInit, maxAttempts = 3, baseDelayMs = 200): Promise<Response> {
-  console.log("[IMPORT URL] fetchWithRetry: Starting fetch with retry logic", {
+async function fetchWithRetry(url: string, init: RequestInit, requestId: string, maxAttempts = 3, baseDelayMs = 200): Promise<Response> {
+  const logPrefix = `[IMPORT URL][${requestId}]`;
+  console.log(`${logPrefix} fetchWithRetry: Starting fetch with retry logic`, {
     url,
     maxAttempts,
     baseDelayMs,
@@ -176,38 +194,38 @@ async function fetchWithRetry(url: string, init: RequestInit, maxAttempts = 3, b
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      console.log(`[IMPORT URL] fetchWithRetry: Making fetch request to ${url}`);
+      console.log(`${logPrefix} fetchWithRetry: Making fetch request to ${url} (attempt ${attempt})`);
       const res = await fetch(url, init);
-      console.log(`[IMPORT URL] fetchWithRetry: Response received, status: ${res.status}`);
+      console.log(`${logPrefix} fetchWithRetry: Response received, status: ${res.status}`);
 
       // If it's a success or a non-retryable error, return immediately
       const shouldRetry = shouldRetryResponse(res);
-      console.log(`[IMPORT URL] fetchWithRetry: Should retry: ${shouldRetry}, is last attempt: ${attempt === maxAttempts}`);
+      console.log(`${logPrefix} fetchWithRetry: Should retry: ${shouldRetry}, is last attempt: ${attempt === maxAttempts}`);
 
       if (!shouldRetry || attempt === maxAttempts) {
-        console.log(`[IMPORT URL] fetchWithRetry: Returning response (status: ${res.status})`);
+        console.log(`${logPrefix} fetchWithRetry: Returning response (status: ${res.status})`);
         return res;
       }
 
-      console.warn(`[IMPORT URL] fetchWithRetry: Backend responded with ${res.status}, retrying (${attempt}/${maxAttempts})`);
+      console.warn(`${logPrefix} fetchWithRetry: Backend responded with ${res.status}, retrying (${attempt}/${maxAttempts})`);
     } catch (err) {
       lastError = err;
-      console.error(`[IMPORT URL] fetchWithRetry: Fetch error on attempt ${attempt}:`, err);
+      console.error(`${logPrefix} fetchWithRetry: Fetch error on attempt ${attempt}:`, err);
 
       if (attempt === maxAttempts) {
-        console.error("[IMPORT URL] fetchWithRetry: Failed to reach backend after all retries");
+        console.error(`${logPrefix} fetchWithRetry: Failed to reach backend after all retries`);
         throw err;
       }
 
-      console.warn(`[IMPORT URL] fetchWithRetry: Network error calling backend, retrying (${attempt}/${maxAttempts})`);
+      console.warn(`${logPrefix} fetchWithRetry: Network error calling backend, retrying (${attempt}/${maxAttempts})`);
     }
 
     const delay = baseDelayMs * attempt;
-    console.log(`[IMPORT URL] fetchWithRetry: Waiting ${delay}ms before next attempt...`);
+    console.log(`${logPrefix} fetchWithRetry: Waiting ${delay}ms before next attempt...`);
     await new Promise((resolve) => setTimeout(resolve, delay));
   }
 
-  console.error("[IMPORT URL] fetchWithRetry: Exhausted all retries, throwing error");
+  console.error(`${logPrefix} fetchWithRetry: Exhausted all retries, throwing error`);
   throw lastError instanceof Error ? lastError : new Error("Unknown fetch error after retries");
 }
 
@@ -229,17 +247,51 @@ function jsonAccepted<T>(data: T): Response {
   });
 }
 
-function jsonError(message: string, status = 500, error_code: string | null = null): Response {
+function jsonError(message: string, status = 500, error_code: string | null = null, request_id: string | null = null): Response {
   const body = {
     success: false,
     error: message,
     error_code,
+    request_id,
     data: null,
   };
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(request_id ? { "X-Request-ID": request_id } : {}),
+    },
   });
+}
+
+function maskEmail(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const [name, domain] = value.trim().split("@");
+  if (!domain) return "***";
+  const prefix = name ? `${name.slice(0, 2)}***` : "***";
+  return `${prefix}@${domain}`;
+}
+
+function summarizeBackendResponse(body: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(body);
+    return {
+      success: parsed?.success,
+      error: parsed?.error,
+      error_code: parsed?.error_code,
+      data_status: parsed?.data?.status,
+      extract_id: parsed?.data?.extract_id,
+      imported_content_id: parsed?.data?.imported_content_id,
+      data_error_code: parsed?.data?.error_code,
+      retry_count: parsed?.data?.retry_count,
+      is_recipe_content: parsed?.data?.is_recipe_content,
+    };
+  } catch {
+    return {
+      raw_preview: body.slice(0, 500),
+      raw_length: body.length,
+    };
+  }
 }
 
 const resolveToFinalUrl = async (url: string): Promise<string> => {
@@ -250,6 +302,22 @@ const resolveToFinalUrl = async (url: string): Promise<string> => {
     throw error;
   }
 };
+
+function isYouTubeUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return (
+      host === "youtube.com" ||
+      host.endsWith(".youtube.com") ||
+      host === "youtube-nocookie.com" ||
+      host.endsWith(".youtube-nocookie.com") ||
+      host === "youtu.be" ||
+      host.endsWith(".youtu.be")
+    );
+  } catch {
+    return false;
+  }
+}
 
 const normalizeTikTokShortUrlForRedirect = (url: string): string => {
   try {
@@ -300,6 +368,11 @@ const sanitizeUrl = async (url: string): Promise<string> => {
     const match = url.match(/\/watch\?v=([A-Za-z0-9_-]+)/);
     if (match) {
       minimalUrl = `https://www.youtube.com/watch?v=${match[1]}`;
+    } else {
+      const shortsMatch = url.match(/\/shorts\/([A-Za-z0-9_-]+)/);
+      if (shortsMatch) {
+        minimalUrl = `https://www.youtube.com/shorts/${shortsMatch[1]}`;
+      }
     }
   } else if (url.includes("youtu.be")) {
     const match = url.match(/youtu\.be\/([A-Za-z0-9_-]+)/);
