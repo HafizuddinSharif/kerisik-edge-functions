@@ -1,5 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 import { getAuthenticatedUserOrThrow } from "../utils/auth.ts";
 
 const prefix = "supabase://scan-uploads/";

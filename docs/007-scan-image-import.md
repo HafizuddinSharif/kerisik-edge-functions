@@ -16,6 +16,9 @@ shipping the mobile UI.
 - Path layout: `{auth_uid}/{uuid}.jpg` for images, `{auth_uid}/{uuid}.pdf` for a
   PDF, `{auth_uid}/{uuid}_cover.jpg` for the backend-rendered PDF cover.
 - Allowed MIME: `image/jpeg`, `application/pdf` (cover written by service-role).
+- Completed `imported_content` rows retain the original private object pointers in
+  `metadata.scan_source`; clients mint short-lived signed URLs only on demand for
+  the source gallery/PDF viewer.
 
 ### RLS policies (both required)
 
