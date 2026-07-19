@@ -334,6 +334,11 @@ entrypoint = "./functions/import-recipe/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/import-recipe/*.html" ]
 
+[functions.import-recipe-image]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/import-recipe-image/index.ts"
+
 [functions.health-check]
 enabled = true
 verify_jwt = true

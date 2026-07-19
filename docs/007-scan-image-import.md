@@ -4,6 +4,12 @@ Supabase slice of the scan-import feature. See root `docs/007-scan-image-import.
 for the full cross-repo design. **Migrations are authored here and suggested to
 the owner — not run from `fastapi/` or `backoffice/`.**
 
+## Implementation status
+
+Implemented in `supabase/migrations/20260719000000_create_scan_uploads_bucket.sql`
+and `supabase/functions/import-recipe-image/index.ts`. Apply/deploy both before
+shipping the mobile UI.
+
 ## New Storage bucket — `scan-uploads`
 
 - **Private** bucket (not public).
