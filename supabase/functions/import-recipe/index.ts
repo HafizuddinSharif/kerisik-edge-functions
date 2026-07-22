@@ -24,7 +24,7 @@ Deno.serve(async (req) => {
     console.log(`${logPrefix} Request method:`, req.method);
     console.log(`${logPrefix} Request URL:`, req.url);
 
-    const { url, email } = await req.json();
+    const { url, email, notification_device_id } = await req.json();
     console.log(`${logPrefix} Received URL:`, url);
     console.log(`${logPrefix} Received email:`, maskEmail(email));
 
@@ -86,6 +86,7 @@ Deno.serve(async (req) => {
       email,
       mode: "async",
       request_id: requestId,
+      notification_device_id: notification_device_id ?? null,
     };
     console.log(`${logPrefix} Backend request summary:`, {
       url: requestBody.url,

@@ -5,7 +5,7 @@ import { getAuthenticatedUserOrThrow } from "../utils/auth.ts";
 const prefix = "supabase://scan-uploads/";
 Deno.serve(async (req) => {
   try {
-    const { image_pointers, email, caption } = await req.json();
+    const { image_pointers, email, caption, notification_device_id } = await req.json();
     if (!Array.isArray(image_pointers) || image_pointers.length < 1 || image_pointers.length > 5) return Response.json({ success: false, error: "Provide 1–5 images or one PDF" }, { status: 422 });
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const user = await getAuthenticatedUserOrThrow(supabase, req);
@@ -15,7 +15,7 @@ Deno.serve(async (req) => {
     }
     const response = await fetch(`${Deno.env.get("MS_LLM_BASE_URL") ?? "http://host.docker.internal:8000"}/api/v2/import-from-image`, {
       method: "POST", headers: { "Content-Type": "application/json", ...(Deno.env.get("MS_LLM_API_KEY") ? { "x-api-key": Deno.env.get("MS_LLM_API_KEY")! } : {}) },
-      body: JSON.stringify({ image_pointers, email, caption }),
+      body: JSON.stringify({ image_pointers, email, caption, notification_device_id: notification_device_id ?? null }),
     });
     return new Response(await response.text(), { status: response.status, headers: { "Content-Type": "application/json" } });
   } catch (error) {
